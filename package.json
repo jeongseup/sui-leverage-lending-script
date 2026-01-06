@@ -11,7 +11,8 @@
     "test:suilend-deposit": "ts-node tests/2_suilend_deposit.ts",
     "test:flash-loan": "ts-node tests/1_scallop_flash-loan-test.ts",
     "test:swap": "ts-node tests/3_7k_swap.ts",
-    "test:swap-execute": "ts-node tests/3_7k_swap_execute.ts"
+    "test:swap-execute": "ts-node tests/3_7k_swap_execute.ts",
+    "test:leverage": "ts-node tests/4_leverage_strategy.ts"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +23,7 @@
     "@mysten/sui": "^1.42.0",
     "@scallop-io/sui-scallop-sdk": "^2.3.11",
     "@suilend/sdk": "^1.1.99",
+    "@suilend/sui-fe": "^0.3.50",
     "@types/node": "^25.0.3",
     "dotenv": "^17.2.3",
     "ts-node": "^10.9.2",
