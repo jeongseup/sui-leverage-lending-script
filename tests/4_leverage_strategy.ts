@@ -114,14 +114,12 @@ async function main() {
 
     // B. Swap USDC to SUI via 7k-SDK
     console.log("Step 2: 7k-SDK Swap USDC -> SUI...");
-    const swapQuotes = await metaAg.quote(
-      {
-        amountIn: flashloanAmount.toString(),
-        coinTypeIn: USDC_COIN_TYPE,
-        coinTypeOut: SUI_COIN_TYPE,
-      },
-      { sender: userAddress }
-    );
+    // Note: Don't pass sender option to avoid simulation that tries to load coins from wallet
+    const swapQuotes = await metaAg.quote({
+      amountIn: flashloanAmount.toString(),
+      coinTypeIn: USDC_COIN_TYPE,
+      coinTypeOut: SUI_COIN_TYPE,
+    });
 
     const bestSwapQuote = swapQuotes.sort(
       (a, b) =>
@@ -142,26 +140,35 @@ async function main() {
     // C. Suilend Operations
     console.log("Step 3: Suilend Deposit & Borrow...");
 
-    // Find existing Obligation
+    // Find existing Obligation or create one in the PTB
     const obligationOwnerCaps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
       suiClient
     );
-    const obligationOwnerCap = obligationOwnerCaps[0];
+    const existingObligationOwnerCap = obligationOwnerCaps[0];
 
-    if (!obligationOwnerCap) {
-      throw new Error(
-        "No Suilend obligation found. Please create one using 'npm run test:suilend-deposit' first."
-      );
+    let obligationOwnerCapId: string;
+    let obligationId: string;
+    const suiTxBlock = tx.txBlock;
+
+    if (existingObligationOwnerCap) {
+      // Use existing obligation
+      obligationOwnerCapId = existingObligationOwnerCap.id;
+      obligationId = existingObligationOwnerCap.obligationId;
+      console.log(`- Using existing Obligation ID: ${obligationId}`);
+    } else {
+      // Create new obligation within the same PTB
+      console.log("- No existing obligation found, creating new one in PTB...");
+      const newObligationOwnerCap = suilendClient.createObligation(suiTxBlock);
+      // For PTB, we pass the TransactionResult directly as the obligation owner cap
+      obligationOwnerCapId = newObligationOwnerCap as any;
+      // For new obligations in PTB, we need to use the obligation from the cap
+      // The obligation ID will be resolved at execution time
+      obligationId = ""; // Will be created at execution
     }
 
-    const obligationOwnerCapId = obligationOwnerCap.id;
-    const obligationId = obligationOwnerCap.obligationId;
-    console.log(`- Using Obligation ID: ${obligationId}`);
-
     // Get user's existing equity SUI from gas coin using the underlying txBlock
-    const suiTxBlock = tx.txBlock;
     const userSui = suiTxBlock.splitCoins(suiTxBlock.gas, [initialEquitySui]);
 
     // Merge with swapped SUI (both are now from the same txBlock context)
@@ -185,48 +192,45 @@ async function main() {
     // and provide the initialEquitySui as separate collateral in a different manner.
     // Let's simplify: deposit the merged coin using low-level moveCall
 
-    // Get the reserve for SUI to find the correct cToken type
-    const suiReserve = suilendClient.lendingMarket.reserves.find((r) =>
-      r.coinType.name.includes("sui::SUI")
-    );
-    if (!suiReserve) throw new Error("SUI reserve not found in Suilend");
+    // Deposit the merged SUI coin into Suilend obligation using the low-level deposit method
+    // The SDK's deposit(sendCoin, coinType, obligationOwnerCap, transaction) handles:
+    // 1. Depositing liquidity and minting cTokens
+    // 2. Depositing cTokens into the obligation
+    suilendClient.deposit(userSui, SUI_COIN_TYPE, obligationOwnerCapId, suiTxBlock);
 
-    // Use depositLiquidityAndGetCTokens with the coin object
-    const cTokens = await suilendClient.depositLiquidityAndGetCTokens(
-      userAddress,
-      SUI_COIN_TYPE,
-      userSui, // Pass the coin object from PTB
-      suiTxBlock
-    );
-
-    // Deposit cTokens into obligation
-    await suilendClient.depositCTokenIntoObligation(
-      SUI_COIN_TYPE,
-      cTokens,
-      suiTxBlock,
-      obligationOwnerCapId
-    );
-
-    // Refresh State (REQUIRED)
-    const obligation = await SuilendClient.getObligation(
-      obligationId,
-      [LENDING_MARKET_TYPE],
-      suiClient
-    );
-    await suilendClient.refreshAll(tx.txBlock, obligation);
+    // Refresh State and Borrow
+    // Note: For new obligations created in PTB, we cannot query on-chain state
+    // We need to refresh all reserves and then borrow
+    if (existingObligationOwnerCap) {
+      // Existing obligation - can query and refresh
+      const obligation = await SuilendClient.getObligation(
+        obligationId,
+        [LENDING_MARKET_TYPE],
+        suiClient
+      );
+      await suilendClient.refreshAll(tx.txBlock, obligation);
+    } else {
+      // New obligation in PTB - still need to refresh reserve prices for the borrow to work
+      // Pass null for obligation but include coinTypes to refresh the required reserves
+      console.log("- Refreshing reserve prices for new obligation...");
+      await suilendClient.refreshAll(tx.txBlock, null as any, [SUI_COIN_TYPE, USDC_COIN_TYPE]);
+    }
 
     // Borrow USDC to repay flashloan
+    // Note: For new obligations, pass addRefreshCalls=false (6th param) to skip internal getObligation
     const borrowedUsdc = await suilendClient.borrow(
       obligationOwnerCapId,
-      obligationId,
+      obligationId || "0x0", // Dummy ID for new obligations (not used when addRefreshCalls=false)
       USDC_COIN_TYPE,
       flashloanAmount.toString(),
-      tx.txBlock
+      tx.txBlock,
+      !existingObligationOwnerCap ? false : true // addRefreshCalls - false for new obligations
     );
 
     // D. Repay Flashloan
     console.log("Step 4: Repay Scallop Flashloan...");
-    await tx.repayFlashLoan(borrowedUsdc, receipt, "usdc");
+    // The borrowedUsdc is a TransactionResult array [coin], extract the first element
+    await tx.repayFlashLoan(borrowedUsdc[0] as any, receipt, "usdc");
 
     // 5. Dry Run using Scallop's inspectTxn
     console.log("\nExecuting dry-run...");

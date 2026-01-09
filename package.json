@@ -20,7 +20,7 @@
   "type": "commonjs",
   "dependencies": {
     "@7kprotocol/sdk-ts": "^4.0.0",
-    "@mysten/sui": "^1.42.0",
+    "@mysten/sui": "^1.44.0",
     "@scallop-io/sui-scallop-sdk": "^2.3.11",
     "@suilend/sdk": "^1.1.99",
     "@suilend/sui-fe": "^0.3.50",
