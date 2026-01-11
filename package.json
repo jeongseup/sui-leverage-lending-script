@@ -13,7 +13,10 @@
     "test:swap-exec": "ts-node tests/3_7k_swap_exec.ts",
     "test:leverage": "ts-node tests/4_leverage_strategy_dryrun.ts",
     "test:leverage-exec": "ts-node tests/4_leverage_strategy_exec.ts",
-    "test:lbtc-leverage": "ts-node tests/5_lbtc_leverage_strategy.ts"
+    "test:lbtc-leverage": "ts-node tests/5_lbtc_leverage_strategy.ts",
+    "test:navi-leverage": "ts-node tests/6_navi_leverage_strategy_dryrun.ts",
+    "test:navi-leverage-exec": "ts-node tests/6_navi_leverage_strategy_exec.ts",
+    "test:navi-deleverage": "ts-node tests/7_navi_deleverage_strategy_dryrun.ts"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +24,7 @@
   "type": "commonjs",
   "dependencies": {
     "@7kprotocol/sdk-ts": "^4.0.0",
+    "@naviprotocol/lending": "^1.0.0",
     "@mysten/sui": "^1.42.0",
     "@scallop-io/sui-scallop-sdk": "^2.3.11",
     "@suilend/sdk": "^1.1.99",

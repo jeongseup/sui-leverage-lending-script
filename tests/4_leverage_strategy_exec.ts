@@ -219,18 +219,19 @@ async function main() {
       suiClient
     );
     const existingCap = obligationOwnerCaps[0];
-    let obligationOwnerCapId: string;
+    let obligationOwnerCap: any;
     let obligationId: string;
+    let isNewObligation = false;
 
     if (existingCap) {
-      obligationOwnerCapId = existingCap.id;
+      obligationOwnerCap = existingCap.id;
       obligationId = existingCap.obligationId;
       console.log(`  Step 3: Using existing obligation`);
     } else {
       console.log(`  Step 3: Creating new obligation`);
-      const newCap = suilendClient.createObligation(tx);
-      obligationOwnerCapId = newCap as any;
+      obligationOwnerCap = suilendClient.createObligation(tx);
       obligationId = "";
+      isNewObligation = true;
     }
 
     // D. Handle deposit coin based on type (SUI vs non-SUI)
@@ -278,9 +279,9 @@ async function main() {
       depositCoin = primaryCoin;
     }
 
-    // E. Refresh oracles BEFORE deposit (include both deposit and borrow coin types)
+    // E. Refresh oracles BEFORE deposit (required for both new and existing obligations)
+    console.log(`  Step 5: Refresh oracles`);
     if (existingCap) {
-      console.log(`  Step 5: Refresh oracles`);
       const obligation = await SuilendClient.getObligation(
         obligationId,
         [LENDING_MARKET_TYPE],
@@ -291,6 +292,12 @@ async function main() {
         normalizedDepositCoin,
         USDC_COIN_TYPE,
       ]);
+    } else {
+      // For new obligations, refresh the reserve prices directly
+      await suilendClient.refreshAll(tx, undefined, [
+        normalizedDepositCoin,
+        USDC_COIN_TYPE,
+      ]);
     }
 
     // F. Deposit merged coins (user's + swapped)
@@ -298,24 +305,34 @@ async function main() {
     suilendClient.deposit(
       depositCoin,
       normalizedDepositCoin,
-      obligationOwnerCapId,
+      obligationOwnerCap,
       tx
     );
 
-    // G. Borrow USDC to repay flash loan (no refresh - already done above)
-    console.log(`  Step 7: Borrow ${formatUnits(flashLoanUsdc, 6)} USDC`);
+    // G. Calculate repayment amount (flash loan + fee)
+    const flashLoanFee = ScallopFlashLoanClient.calculateFee(BigInt(flashLoanUsdc));
+    const repaymentAmount = BigInt(flashLoanUsdc) + flashLoanFee;
+
+    // Borrow USDC to repay flash loan (no refresh - already done above)
+    console.log(`  Step 7: Borrow ${formatUnits(repaymentAmount, 6)} USDC (includes flash loan fee)`);
     const borrowedUsdc = await suilendClient.borrow(
-      obligationOwnerCapId,
+      obligationOwnerCap,
       obligationId || "0x0",
       USDC_COIN_TYPE,
-      flashLoanUsdc.toString(),
+      repaymentAmount.toString(),
       tx,
       false // Already did refreshAll above
     );
 
-    // H. Repay flash loan
+    // H. Repay flash loan with borrowed USDC
     console.log(`  Step 8: Repay flash loan`);
     flashLoanClient.repayFlashLoan(tx, borrowedUsdc[0] as any, receipt, "usdc");
+
+    // I. If new obligation was created, transfer the cap to user
+    if (isNewObligation) {
+      console.log(`  Step 9: Transfer new ObligationOwnerCap to user`);
+      tx.transferObjects([obligationOwnerCap], userAddress);
+    }
 
     // 6. Execute Transaction
     console.log(`\n🚀 Executing transaction...`);
