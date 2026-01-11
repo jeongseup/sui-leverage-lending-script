@@ -68,6 +68,21 @@ async function main() {
       "0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf",
   });
 
+  // Log wallet balances
+  console.log(`\n💰 Wallet Balances:`);
+  const allBalances = await suiClient.getAllBalances({ owner: userAddress });
+  for (const b of allBalances) {
+    const sym = b.coinType.split("::").pop();
+    if (Number(b.totalBalance) > 0) {
+      console.log(`   ${sym}: ${b.totalBalance}`);
+    }
+  }
+  const suiCoins = await suiClient.getCoins({
+    owner: userAddress,
+    coinType: "0x2::sui::SUI",
+  });
+  console.log(`   SUI Coins Count: ${suiCoins.data.length}`);
+
   // 2. Get config from .env.public
   const DEPOSIT_COIN_TYPE =
     process.env.LEVERAGE_DEPOSIT_COIN_TYPE || COIN_TYPES.LBTC;
@@ -218,26 +233,43 @@ async function main() {
       obligationId = "";
     }
 
-    // D. Get user's existing deposit coins and merge
-    console.log(`  Step 4: Merge user's ${symbol} with swapped ${symbol}`);
-    const userCoins = await suiClient.getCoins({
-      owner: userAddress,
-      coinType: normalizedDepositCoin,
-    });
+    // D. Handle deposit coin based on type (SUI vs non-SUI)
+    const isSui = normalizedDepositCoin.endsWith("::sui::SUI");
+    let depositCoin: any;
 
-    if (userCoins.data.length === 0) {
-      console.log(`\n⚠️  No ${symbol} coins found in wallet!`);
-      return;
-    }
+    if (isSui) {
+      // For SUI: split user's deposit amount from gas, then merge with swapped SUI
+      console.log(
+        `  Step 4: Split user's SUI from gas and merge with swapped SUI`
+      );
+      // Split only user's initial deposit amount (not including expected swap output)
+      const [userDeposit] = tx.splitCoins(tx.gas, [BigInt(DEPOSIT_AMOUNT)]);
+      // Merge swapped SUI into user's deposit
+      tx.mergeCoins(userDeposit, [swappedAsset]);
+      depositCoin = userDeposit;
+    } else {
+      // For non-SUI: merge user's coins with swapped asset
+      console.log(`  Step 4: Merge user's ${symbol} with swapped ${symbol}`);
+      const userCoins = await suiClient.getCoins({
+        owner: userAddress,
+        coinType: normalizedDepositCoin,
+      });
 
-    const primaryCoin = tx.object(userCoins.data[0].coinObjectId);
-    if (userCoins.data.length > 1) {
-      const otherCoins = userCoins.data
-        .slice(1)
-        .map((c) => tx.object(c.coinObjectId));
-      tx.mergeCoins(primaryCoin, otherCoins);
+      if (userCoins.data.length === 0) {
+        console.log(`\n⚠️  No ${symbol} coins found in wallet!`);
+        return;
+      }
+
+      const primaryCoin = tx.object(userCoins.data[0].coinObjectId);
+      if (userCoins.data.length > 1) {
+        const otherCoins = userCoins.data
+          .slice(1)
+          .map((c) => tx.object(c.coinObjectId));
+        tx.mergeCoins(primaryCoin, otherCoins);
+      }
+      tx.mergeCoins(primaryCoin, [swappedAsset]);
+      depositCoin = primaryCoin;
     }
-    tx.mergeCoins(primaryCoin, [swappedAsset]);
 
     // E. Refresh oracles BEFORE deposit (include both deposit and borrow coin types)
     if (existingCap) {
@@ -257,7 +289,7 @@ async function main() {
     // F. Deposit merged coins (user's + swapped)
     console.log(`  Step 6: Deposit all ${symbol} as collateral`);
     suilendClient.deposit(
-      primaryCoin,
+      depositCoin,
       normalizedDepositCoin,
       obligationOwnerCapId,
       tx
