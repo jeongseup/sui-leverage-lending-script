@@ -17,7 +17,7 @@ import { ScallopFlashLoanClient } from "../src/lib/scallop";
 import { getReserveByCoinType, COIN_TYPES } from "../src/lib/const";
 
 /**
- * Navi Deleverage Strategy - Close leveraged position
+ * Navi Deleverage Strategy - Close leveraged position (Execute)
  *
  * Flow:
  * 1. Flash loan USDC from Scallop (to repay Navi debt)
@@ -50,7 +50,8 @@ function formatUnits(
 
 async function main() {
   console.log("─".repeat(55));
-  console.log("  📉 Navi Deleverage Strategy (Dry Run)");
+  console.log("  📉 Navi Deleverage Strategy (Execute)");
+  console.log("  ⚠️  WARNING: This will execute a REAL transaction!");
   console.log("─".repeat(55));
 
   // 1. Setup
@@ -439,28 +440,17 @@ async function main() {
     );
     tx.transferObjects([withdrawnCoin as any, swappedUsdc as any], userAddress);
 
-    // 7. Dry Run
-    console.log(`\n🧪 Building and running dry-run...`);
-    const txBytes = await tx.build({ client: suiClient });
-
-    // Estimate gas
-    const gasEstimate = await suiClient.dryRunTransactionBlock({
-      transactionBlock: txBytes,
+    // 7. Execute Transaction
+    console.log(`\n🚀 Executing transaction...`);
+    const result = await suiClient.signAndExecuteTransaction({
+      transaction: tx,
+      signer: keypair,
+      options: { showEffects: true },
     });
 
-    const computationCost = BigInt(gasEstimate.effects.gasUsed.computationCost);
-    const storageCost = BigInt(gasEstimate.effects.gasUsed.storageCost);
-    const storageRebate = BigInt(gasEstimate.effects.gasUsed.storageRebate);
-    const totalGas = computationCost + storageCost - storageRebate;
-
-    console.log(`\n⛽ Estimated Gas:`);
-    console.log(`  Computation: ${formatUnits(computationCost, 9)} SUI`);
-    console.log(`  Storage:     ${formatUnits(storageCost, 9)} SUI`);
-    console.log(`  Rebate:      -${formatUnits(storageRebate, 9)} SUI`);
-    console.log(`  Total:       ~${formatUnits(totalGas, 9)} SUI`);
-
-    if (gasEstimate.effects.status.status === "success") {
-      console.log(`\n✅ Dry-run successful!`);
+    if (result.effects?.status.status === "success") {
+      console.log(`\n✅ Transaction successful!`);
+      console.log(`📋 Digest: ${result.digest}`);
       console.log(`\n📊 Result:`);
       console.log(`─`.repeat(55));
       console.log(`  Position closed successfully`);
@@ -481,8 +471,10 @@ async function main() {
       );
       console.log(`  Total value: ~$${totalProfitUsd.toFixed(2)}`);
       console.log(`─`.repeat(55));
+
+      console.log(`\nGas used: ${result.effects.gasUsed.computationCost}`);
     } else {
-      console.error(`\n❌ Dry-run failed:`, gasEstimate.effects.status.error);
+      console.error(`\n❌ Transaction failed:`, result.effects?.status.error);
     }
 
     console.log(`\n` + "─".repeat(55));

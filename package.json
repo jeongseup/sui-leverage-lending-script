@@ -16,7 +16,9 @@
     "test:lbtc-leverage": "ts-node tests/5_lbtc_leverage_strategy.ts",
     "test:navi-leverage": "ts-node tests/6_navi_leverage_strategy_dryrun.ts",
     "test:navi-leverage-exec": "ts-node tests/6_navi_leverage_strategy_exec.ts",
-    "test:navi-deleverage": "ts-node tests/7_navi_deleverage_strategy_dryrun.ts"
+    "test:navi-deleverage": "ts-node tests/7_navi_deleverage_strategy_dryrun.ts",
+    "test:navi-deleverage-exec": "ts-node tests/7_navi_deleverage_strategy_exec.ts",
+    "test:navi-calc": "ts-node tests/test_navi_calculations.ts"
   },
   "keywords": [],
   "author": "",

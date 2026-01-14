@@ -105,7 +105,7 @@ async function main() {
 
   // Flash loan amount = Initial Equity * (Multiplier - 1)
   const flashLoanUsd = initialEquityUsd * (MULTIPLIER - 1);
-  const flashLoanUsdc = Math.ceil(flashLoanUsd * 1e6 * 1.02); // 6 decimals + 2% buffer
+  const flashLoanUsdc = Math.ceil(flashLoanUsd * 1e6); // 6 decimals
 
   // Total position after leverage
   const totalPositionUsd = initialEquityUsd * MULTIPLIER;
@@ -170,7 +170,9 @@ async function main() {
     // 4. Fetch Navi pools
     console.log(`\nFetching Navi pools...`);
     const pools = await getPools({ env: "prod" });
-    const poolsArray: any[] = Array.isArray(pools) ? pools : Object.values(pools);
+    const poolsArray: any[] = Array.isArray(pools)
+      ? pools
+      : Object.values(pools);
 
     // Find deposit asset pool and USDC pool
     const depositPool = poolsArray.find((p) => {
@@ -199,7 +201,8 @@ async function main() {
     const priceFeeds = await getPriceFeeds({ env: "prod" });
     const depositFeed = priceFeeds.find(
       (f: any) =>
-        normalizeCoinType(f.coinType) === normalizeCoinType(depositPool.coinType)
+        normalizeCoinType(f.coinType) ===
+        normalizeCoinType(depositPool.coinType)
     );
     const usdcFeed = priceFeeds.find(
       (f: any) =>
@@ -224,12 +227,16 @@ async function main() {
     )[0];
 
     const expectedOutput = Number(bestQuote.amountOut);
-    const totalDepositAmount = BigInt(DEPOSIT_AMOUNT) + BigInt(bestQuote.amountOut);
+    const totalDepositAmount =
+      BigInt(DEPOSIT_AMOUNT) + BigInt(bestQuote.amountOut);
     console.log(
       `  Expected from swap: ${formatUnits(expectedOutput, decimals)} ${symbol}`
     );
     console.log(
-      `  Total to deposit:   ${formatUnits(totalDepositAmount, decimals)} ${symbol}`
+      `  Total to deposit:   ${formatUnits(
+        totalDepositAmount,
+        decimals
+      )} ${symbol}`
     );
 
     // 7. Build Transaction
@@ -306,7 +313,10 @@ async function main() {
 
     // E. Deposit merged coins to Navi
     console.log(
-      `  Step 5: Deposit ${formatUnits(totalDepositAmount, decimals)} ${symbol} to Navi`
+      `  Step 5: Deposit ${formatUnits(
+        totalDepositAmount,
+        decimals
+      )} ${symbol} to Navi`
     );
     await depositCoinPTB(tx as any, depositPool, depositCoin, {
       amount: Number(totalDepositAmount),
@@ -314,7 +324,9 @@ async function main() {
     });
 
     // F. Calculate repayment amount (flash loan + fee)
-    const flashLoanFee = ScallopFlashLoanClient.calculateFee(BigInt(flashLoanUsdc));
+    const flashLoanFee = ScallopFlashLoanClient.calculateFee(
+      BigInt(flashLoanUsdc)
+    );
     const repaymentAmount = BigInt(flashLoanUsdc) + flashLoanFee;
 
     // G. Borrow USDC from Navi to repay flash loan
@@ -346,10 +358,16 @@ async function main() {
       console.log(`\n📊 Final Position:`);
       console.log(`─`.repeat(55));
       console.log(
-        `  Collateral: ${formatUnits(totalDepositAmount, decimals)} ${symbol} (~$${totalPositionUsd.toFixed(2)})`
+        `  Collateral: ${formatUnits(
+          totalDepositAmount,
+          decimals
+        )} ${symbol} (~$${totalPositionUsd.toFixed(2)})`
       );
       console.log(
-        `  Debt:       ${formatUnits(repaymentAmount, 6)} USDC (~$${debtUsd.toFixed(2)})`
+        `  Debt:       ${formatUnits(
+          repaymentAmount,
+          6
+        )} USDC (~$${debtUsd.toFixed(2)})`
       );
       console.log(`  Leverage:   ${MULTIPLIER}x`);
       console.log(`─`.repeat(55));
