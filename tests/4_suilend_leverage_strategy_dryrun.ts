@@ -303,11 +303,18 @@ async function main() {
     );
 
     // G. Calculate repayment amount (flash loan + fee)
-    const flashLoanFee = ScallopFlashLoanClient.calculateFee(BigInt(flashLoanUsdc));
+    const flashLoanFee = ScallopFlashLoanClient.calculateFee(
+      BigInt(flashLoanUsdc)
+    );
     const repaymentAmount = BigInt(flashLoanUsdc) + flashLoanFee;
 
     // Borrow USDC to repay flash loan (no refresh - already done above)
-    console.log(`  Step 7: Borrow ${formatUnits(repaymentAmount, 6)} USDC (includes flash loan fee)`);
+    console.log(
+      `  Step 7: Borrow ${formatUnits(
+        repaymentAmount,
+        6
+      )} USDC (includes flash loan fee)`
+    );
     const borrowedUsdc = await suilendClient.borrow(
       obligationOwnerCap,
       obligationId || "0x0",
@@ -335,7 +342,7 @@ async function main() {
 
     if (dryRunResult.effects.status.status === "success") {
       console.log(`✅ Dry-run successful!`);
-      console.log(`\n💡 To execute, use: npm run test:leverage-exec`);
+      console.log(`\n💡 To execute, use: npm run test:suilend-leverage-exec`);
     } else {
       console.error(`❌ Dry-run failed:`, dryRunResult.effects.status.error);
     }
