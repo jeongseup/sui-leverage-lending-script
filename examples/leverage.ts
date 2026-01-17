@@ -5,7 +5,7 @@
  */
 
 import * as dotenv from "dotenv";
-dotenv.config({ path: ".env.test" });
+dotenv.config({ path: ".env" });
 
 import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
