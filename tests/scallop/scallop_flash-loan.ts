@@ -2,12 +2,11 @@ import * as dotenv from "dotenv";
 dotenv.config(); // Load SECRET_KEY from .env
 dotenv.config({ path: ".env.public" }); // Load other configs from .env.public
 
-import { Transaction } from "@mysten/sui/transactions";
+import { Scallop } from "@scallop-io/sui-scallop-sdk";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
+import { getFullnodeUrl } from "@mysten/sui/client";
 import { getTokenPrice } from "@7kprotocol/sdk-ts";
-import { ScallopFlashLoanClient } from "../src/lib/scallop";
-import { getReserveByCoinType, COIN_TYPES } from "../src/lib/const";
+import { getReserveByCoinType, COIN_TYPES } from "../../src/lib/suilend/const";
 
 function normalizeCoinType(coinType: string) {
   const parts = coinType.split("::");
@@ -33,7 +32,7 @@ function formatUnits(
   );
 }
 
-async function testFlashLoanWithCustomClient() {
+async function testFlashLoanWithScallopSDK() {
   // 1. Initial Setup
   const secretKey = process.env.SECRET_KEY;
   const SUI_FULLNODE_URL =
@@ -59,8 +58,6 @@ async function testFlashLoanWithCustomClient() {
 
   const sender = keypair.getPublicKey().toSuiAddress();
   console.log("Sender Address:", sender);
-
-  const client = new SuiClient({ url: SUI_FULLNODE_URL });
 
   // 2. Get asset info from const.ts
   const normalizedCoinType = normalizeCoinType(FLASH_LOAN_COIN_TYPE);
@@ -90,21 +87,24 @@ async function testFlashLoanWithCustomClient() {
   console.log(`  USD Value:   ~$${usdValue.toFixed(2)}`);
   console.log(`─`.repeat(40));
 
-  // 4. Create Custom Flash Loan Client
-  const flashLoanClient = new ScallopFlashLoanClient();
+  // 4. Initialize Scallop SDK
+  const scallopSDK = new Scallop({
+    secretKey: secretKey,
+    networkType: "mainnet",
+  });
+  await scallopSDK.init();
 
-  // 5. Create Transaction
-  const tx = new Transaction();
+  const builder = await scallopSDK.createScallopBuilder();
+  const tx = builder.createTxBlock();
   tx.setSender(sender);
 
   try {
-    // 6. Borrow Flash Loan
+    // 5. Borrow Flash Loan
     console.log(
       `\n🔄 Borrowing ${formatUnits(loanAmount, decimals)} ${symbol}...`
     );
-    const [loanCoin, receipt] = flashLoanClient.borrowFlashLoan(
-      tx,
-      loanAmount,
+    const [loanCoin, receipt] = await tx.borrowFlashLoan(
+      Number(loanAmount),
       coinName
     );
 
@@ -113,50 +113,29 @@ async function testFlashLoanWithCustomClient() {
      * 예: const swappedCoin = await metaAg.swap({ ... tx, coinIn: loanCoin });
      */
 
-    // 7. Repay Flash Loan (바로 상환)
+    // 6. Repay Flash Loan (바로 상환)
     console.log(
       `💰 Repaying ${formatUnits(loanAmount, decimals)} ${symbol}...`
     );
-    flashLoanClient.repayFlashLoan(tx, loanCoin, receipt, coinName);
+    await tx.repayFlashLoan(loanCoin, receipt, coinName);
 
-    // 8. Dry Run first
-    console.log("\n🧪 Running dry-run...");
-    const dryRunResult = await client.dryRunTransactionBlock({
-      transactionBlock: await tx.build({ client }),
-    });
-
-    if (dryRunResult.effects.status.status === "failure") {
-      console.error("❌ Dry-run failed:", dryRunResult.effects.status.error);
-      return;
-    }
-
-    console.log("✅ Dry-run successful!");
-
-    // 9. Execute Transaction
+    // 7. Execute Transaction
     console.log("\n🚀 Executing transaction...");
-    const result = await client.signAndExecuteTransaction({
-      transaction: tx,
-      signer: keypair,
-      options: { showEffects: true },
-    });
+    const result = await builder.signAndSendTxBlock(tx);
 
-    if (result.effects?.status.status === "success") {
-      console.log(`\n✅ Flash Loan Success!`);
-      console.log(`📋 Digest: ${result.digest}`);
-      console.log(
-        `📊 Borrowed & Repaid: ${formatUnits(
-          loanAmount,
-          decimals
-        )} ${symbol} (~$${usdValue.toFixed(2)})`
-      );
-    } else {
-      console.error("❌ Flash Loan Failed:", result.effects?.status.error);
-    }
+    console.log(`\n✅ Flash Loan Success!`);
+    console.log(`📋 Digest: ${result.digest}`);
+    console.log(
+      `📊 Borrowed & Repaid: ${formatUnits(
+        loanAmount,
+        decimals
+      )} ${symbol} (~$${usdValue.toFixed(2)})`
+    );
   } catch (error) {
     console.error("❌ Error:", error);
   }
 }
 
-testFlashLoanWithCustomClient().catch((err) => {
+testFlashLoanWithScallopSDK().catch((err) => {
   console.error("Unhandled error:", err);
 });

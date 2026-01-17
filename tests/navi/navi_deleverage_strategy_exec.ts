@@ -5,21 +5,24 @@ import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
-  SuilendClient,
-  LENDING_MARKET_ID,
-  LENDING_MARKET_TYPE,
-} from "@suilend/sdk";
+  repayCoinPTB,
+  withdrawCoinPTB,
+  getLendingState,
+  updateOraclePricesPTB,
+  getPriceFeeds,
+  normalizeCoinType,
+} from "@naviprotocol/lending";
 import { MetaAg, getTokenPrice } from "@7kprotocol/sdk-ts";
-import { ScallopFlashLoanClient } from "../src/lib/scallop";
-import { getReserveByCoinType, COIN_TYPES } from "../src/lib/const";
+import { ScallopFlashLoanClient } from "../../src/lib/scallop";
+import { getReserveByCoinType, COIN_TYPES } from "../../src/lib/suilend/const";
 
 /**
- * Suilend Deleverage Strategy - Close leveraged position (Execute)
+ * Navi Deleverage Strategy - Close leveraged position (Execute)
  *
  * Flow:
- * 1. Flash loan USDC from Scallop (to repay Suilend debt)
- * 2. Repay all USDC debt on Suilend
- * 3. Withdraw all collateral from Suilend
+ * 1. Flash loan USDC from Scallop (to repay Navi debt)
+ * 2. Repay all USDC debt on Navi
+ * 3. Withdraw all collateral from Navi
  * 4. Swap withdrawn asset → USDC using 7k
  * 5. Repay Scallop flash loan
  * 6. Transfer remaining funds to user
@@ -28,17 +31,6 @@ import { getReserveByCoinType, COIN_TYPES } from "../src/lib/const";
 const SUI_FULLNODE_URL =
   process.env.SUI_FULLNODE_URL || getFullnodeUrl("mainnet");
 const USDC_COIN_TYPE = COIN_TYPES.USDC;
-
-// Suilend uses WAD (10^18) for internal precision
-const WAD = 10n ** 18n;
-
-function normalizeCoinType(coinType: string): string {
-  const parts = coinType.split("::");
-  if (parts.length !== 3) return coinType;
-  let pkg = parts[0].replace("0x", "");
-  pkg = pkg.padStart(64, "0");
-  return `0x${pkg}::${parts[1]}::${parts[2]}`;
-}
 
 function formatUnits(
   amount: string | number | bigint,
@@ -58,7 +50,7 @@ function formatUnits(
 
 async function main() {
   console.log("─".repeat(55));
-  console.log("  📉 Suilend Deleverage Strategy (Execute)");
+  console.log("  📉 Navi Deleverage Strategy (Execute)");
   console.log("  ⚠️  WARNING: This will execute a REAL transaction!");
   console.log("─".repeat(55));
 
@@ -80,52 +72,28 @@ async function main() {
     coinType: "0x2::sui::SUI",
   });
   console.log(`💰 SUI Balance: ${formatUnits(suiBalance.totalBalance, 9)} SUI`);
-
   const flashLoanClient = new ScallopFlashLoanClient();
-  const suilendClient = await SuilendClient.initialize(
-    LENDING_MARKET_ID,
-    LENDING_MARKET_TYPE,
-    suiClient
-  );
   const metaAg = new MetaAg({
     partner:
       "0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf",
   });
 
-  // 2. Get current Suilend position
-  console.log(`\n📊 Fetching current Suilend position...`);
+  // 2. Get current Navi position
+  console.log(`\n📊 Fetching current Navi position...`);
+  const lendingState = await getLendingState(userAddress, { env: "prod" });
 
-  const obligationOwnerCaps = await SuilendClient.getObligationOwnerCaps(
-    userAddress,
-    [LENDING_MARKET_TYPE],
-    suiClient
-  );
-
-  if (obligationOwnerCaps.length === 0) {
-    console.log(`\n⚠️  No obligations found on Suilend`);
+  if (lendingState.length === 0) {
+    console.log(`\n⚠️  No active positions found on Navi`);
     return;
   }
 
-  const existingCap = obligationOwnerCaps[0];
-  const obligationId = existingCap.obligationId;
-
-  const obligation = await SuilendClient.getObligation(
-    obligationId,
-    [LENDING_MARKET_TYPE],
-    suiClient
+  // Find positions with supply or borrow
+  const activePositions = lendingState.filter(
+    (p) => BigInt(p.supplyBalance) > 0 || BigInt(p.borrowBalance) > 0
   );
 
-  if (!obligation) {
-    console.log(`\n⚠️  Could not fetch obligation details`);
-    return;
-  }
-
-  // Parse deposits and borrows from obligation
-  const deposits = obligation.deposits || [];
-  const borrows = obligation.borrows || [];
-
-  if (deposits.length === 0 && borrows.length === 0) {
-    console.log(`\n⚠️  No active positions found on Suilend`);
+  if (activePositions.length === 0) {
+    console.log(`\n⚠️  No active supply or borrow positions found`);
     return;
   }
 
@@ -134,63 +102,75 @@ async function main() {
 
   const normalizedUsdcCoin = normalizeCoinType(USDC_COIN_TYPE);
 
+  // Navi SDK returns balances with 9 decimal precision internally
+  const NAVI_BALANCE_DECIMALS = 9;
+
   // Find supply position (collateral) and borrow position (debt)
-  let supplyDeposit: any = null;
-  let borrowPosition: any = null;
-  let supplyCoinType: string = "";
-  let borrowCoinType: string = "";
+  let supplyPosition: (typeof activePositions)[0] | null = null;
+  let borrowPosition: (typeof activePositions)[0] | null = null;
 
-  for (const deposit of deposits as any[]) {
-    // Suilend SDK uses coinType.name for the coin type string
-    const coinType = normalizeCoinType(deposit.coinType.name);
-    const reserveInfo = getReserveByCoinType(coinType);
-    const symbol = reserveInfo?.symbol || coinType.split("::").pop() || "???";
-    const decimals = reserveInfo?.decimals || 9;
-    // depositedCtokenAmount is already a number/bigint (not Decimal)
-    const amount = BigInt(deposit.depositedCtokenAmount);
+  for (const pos of activePositions) {
+    const poolCoinType = normalizeCoinType(pos.pool.coinType);
+    const reserve = getReserveByCoinType(poolCoinType);
+    const symbol = reserve?.symbol || poolCoinType.split("::").pop() || "???";
 
-    console.log(`  Supply:  ${formatUnits(amount, decimals)} ${symbol}`);
-    supplyDeposit = deposit;
-    supplyCoinType = coinType;
-  }
-
-  for (const borrow of borrows as any[]) {
-    // Suilend SDK uses coinType.name for the coin type string
-    const coinType = normalizeCoinType(borrow.coinType.name);
-    const reserveInfo = getReserveByCoinType(coinType);
-    const symbol = reserveInfo?.symbol || coinType.split("::").pop() || "???";
-    const decimals = reserveInfo?.decimals || 6;
-    // borrowedAmount is a Decimal-like object with .value property, need WAD division
-    const rawAmount = BigInt(borrow.borrowedAmount.value);
-    const amount = rawAmount / WAD;
-
-    console.log(`  Borrow:  ${formatUnits(amount, decimals)} ${symbol}`);
-    borrowPosition = borrow;
-    borrowCoinType = coinType;
+    if (BigInt(pos.supplyBalance) > 0) {
+      console.log(
+        `  Supply:  ${formatUnits(
+          pos.supplyBalance,
+          NAVI_BALANCE_DECIMALS
+        )} ${symbol}`
+      );
+      supplyPosition = pos;
+    }
+    if (BigInt(pos.borrowBalance) > 0) {
+      console.log(
+        `  Borrow:  ${formatUnits(
+          pos.borrowBalance,
+          NAVI_BALANCE_DECIMALS
+        )} ${symbol}`
+      );
+      borrowPosition = pos;
+    }
   }
   console.log(`─`.repeat(55));
 
-  if (!supplyDeposit || !supplyCoinType) {
+  if (!supplyPosition) {
     console.log(`\n⚠️  No supply position found to withdraw`);
     return;
   }
 
-  if (!borrowPosition || !borrowCoinType) {
+  if (!borrowPosition) {
     console.log(`\n⚠️  No borrow position found - nothing to deleverage`);
     console.log(`   Use a simple withdraw instead.`);
     return;
   }
 
-  const supplyReserveInfo = getReserveByCoinType(supplyCoinType);
-  const borrowReserveInfo = getReserveByCoinType(borrowCoinType);
+  // Get position details
+  const supplyPool = supplyPosition.pool;
+  const borrowPool = borrowPosition.pool;
 
-  const supplySymbol = supplyReserveInfo?.symbol || "???";
-  const borrowSymbol = borrowReserveInfo?.symbol || "USDC";
-  const supplyDecimals = supplyReserveInfo?.decimals || 9;
-  const borrowDecimals = borrowReserveInfo?.decimals || 6;
+  // Navi SDK balances are in 9 decimal precision
+  const supplyBalanceNavi = BigInt(supplyPosition.supplyBalance);
+  const borrowBalanceNavi = BigInt(borrowPosition.borrowBalance);
 
-  const supplyAmount = BigInt(supplyDeposit.depositedCtokenAmount);
-  const borrowAmount = BigInt(borrowPosition.borrowedAmount.value) / WAD;
+  const supplyCoinType = normalizeCoinType(supplyPool.coinType);
+  const borrowCoinType = normalizeCoinType(borrowPool.coinType);
+
+  const supplyReserve = getReserveByCoinType(supplyCoinType);
+  const borrowReserve = getReserveByCoinType(borrowCoinType);
+
+  const supplySymbol = supplyReserve?.symbol || "???";
+  const borrowSymbol = borrowReserve?.symbol || "USDC";
+  const supplyDecimals = supplyReserve?.decimals || 9;
+  const borrowDecimals = borrowReserve?.decimals || 6;
+
+  // Convert from Navi's 9 decimal precision to coin's native decimals
+  // For SUI (9 decimals): no conversion needed
+  // For USDC (6 decimals): divide by 10^3
+  const supplyAmount = supplyBalanceNavi; // SUI is 9 decimals, same as Navi
+  const borrowAmount =
+    borrowBalanceNavi / BigInt(10 ** (NAVI_BALANCE_DECIMALS - borrowDecimals));
 
   // Check if borrow is USDC (required for this strategy)
   if (borrowCoinType !== normalizedUsdcCoin) {
@@ -236,11 +216,12 @@ async function main() {
 
     console.log(`\n🔍 Flash Loan Details:`);
     console.log(
-      `  Flash Loan: ${formatUnits(flashLoanUsdc, 6)} USDC (debt + 0.5% buffer)`
+      `  Flash Loan: ${formatUnits(flashLoanUsdc, 6)} USDC (debt + 5% buffer)`
     );
     console.log(`  Flash Fee:  ${formatUnits(flashLoanFee, 6)} USDC`);
 
     // 4. Calculate optimal swap amount using reverse calculation
+    // First, get a quote for full withdrawal to determine exchange rate
     const withdrawAmountForQuote = (supplyAmount * BigInt(999)) / BigInt(1000);
     console.log(`\n🔍 Calculating optimal swap amount...`);
     const fullSwapQuotes = await metaAg.quote({
@@ -279,12 +260,14 @@ async function main() {
     }
 
     // Calculate how much collateral we need to swap to get exactly totalRepayment USDC
-    const targetUsdcOut = (totalRepayment * BigInt(102)) / BigInt(100); // 2% buffer
+    // Add 2% buffer for slippage: we want (totalRepayment * 1.02) USDC output
+    const targetUsdcOut = (totalRepayment * BigInt(102)) / BigInt(100);
 
     // Calculate required input based on exchange rate from full quote
+    // requiredInput = targetOutput * (fullSwapIn / fullSwapOut)
     const requiredSwapIn = (targetUsdcOut * fullSwapIn) / fullSwapOut;
 
-    // Cap at withdrawal amount
+    // Cap at withdrawal amount (can't swap more than we have)
     const actualSwapIn =
       requiredSwapIn > withdrawAmountForQuote
         ? withdrawAmountForQuote
@@ -350,6 +333,7 @@ async function main() {
       console.log(
         `\n⚠️  Warning: Swap output may not cover flash loan, using full swap instead`
       );
+      // Fall back to full swap if optimized amount isn't enough
     }
 
     const estimatedUsdcProfit = expectedUsdcOut - totalRepayment;
@@ -368,13 +352,22 @@ async function main() {
     );
     console.log(`  Total value:    ~$${totalProfitUsd.toFixed(2)}`);
 
-    // 5. Build Transaction
+    // 5. Fetch price feeds for oracle update
+    const priceFeeds = await getPriceFeeds({ env: "prod" });
+    const supplyFeed = priceFeeds.find(
+      (f: any) => normalizeCoinType(f.coinType) === supplyCoinType
+    );
+    const usdcFeed = priceFeeds.find(
+      (f: any) => normalizeCoinType(f.coinType) === normalizedUsdcCoin
+    );
+
+    // 6. Build Transaction
     console.log(`\n🔧 Building transaction...`);
     const tx = new Transaction();
     tx.setSender(userAddress);
     tx.setGasBudget(100_000_000);
 
-    // A. Flash loan USDC from Scallop
+    // A. Flash loan USDC from Scallop (use full flash loan for repayment, rely on swap for flash loan payback)
     console.log(`  Step 1: Flash loan ${formatUnits(flashLoanUsdc, 6)} USDC`);
     const [loanCoin, receipt] = flashLoanClient.borrowFlashLoan(
       tx,
@@ -382,33 +375,35 @@ async function main() {
       "usdc"
     );
 
-    // B. Refresh oracles before repay
-    console.log(`  Step 2: Refresh oracles`);
-    await suilendClient.refreshAll(tx, obligation, [
-      supplyCoinType,
-      USDC_COIN_TYPE,
-    ]);
+    // B. Update oracle prices
+    const feedsToUpdate = [supplyFeed, usdcFeed].filter(Boolean);
+    if (feedsToUpdate.length > 0) {
+      console.log(`  Step 2: Update oracle prices`);
+      await updateOraclePricesPTB(tx as any, feedsToUpdate, {
+        env: "prod",
+        updatePythPriceFeeds: true,
+      });
+    }
 
-    // C. Repay USDC debt on Suilend (using obligationId, not cap.id)
-    // Following SDK pattern: repay() + transferObjects([sendCoin])
-    console.log(`  Step 3: Repay USDC debt on Suilend (using flash loan)`);
-    suilendClient.repay(obligationId, USDC_COIN_TYPE, loanCoin, tx);
+    // C. Repay USDC debt on Navi using entire flash loan (Navi will use what it needs)
+    console.log(`  Step 3: Repay USDC debt on Navi (using flash loan)`);
+    await repayCoinPTB(tx as any, borrowPool, loanCoin, {
+      env: "prod",
+    });
 
-    // D. Withdraw all collateral from Suilend
-    const withdrawAmount = withdrawAmountForQuote;
+    // D. Withdraw all collateral from Navi (withdraw slightly less to avoid rounding issues)
+    const withdrawAmount = withdrawAmountForQuote; // 99.9% to avoid dust
     console.log(
       `  Step 4: Withdraw ${formatUnits(
         withdrawAmount,
         supplyDecimals
-      )} ${supplySymbol} from Suilend`
+      )} ${supplySymbol} from Navi`
     );
-    const withdrawnCoinResult = await suilendClient.withdraw(
-      existingCap.id,
-      obligationId,
-      supplyCoinType,
-      withdrawAmount.toString(),
-      tx,
-      false // Already refreshed above
+    const withdrawnCoin = await withdrawCoinPTB(
+      tx as any,
+      supplyPool,
+      Number(withdrawAmount),
+      { env: "prod" }
     );
 
     // E. Split: only swap what we need, keep the rest
@@ -418,9 +413,7 @@ async function main() {
         supplyDecimals
       )} ${supplySymbol}`
     );
-    const [coinToSwap] = tx.splitCoins(withdrawnCoinResult[0] as any, [
-      actualSwapIn,
-    ]);
+    const [coinToSwap] = tx.splitCoins(withdrawnCoin as any, [actualSwapIn]);
 
     // F. Swap partial collateral → USDC
     console.log(`  Step 6: Swap ${supplySymbol} → USDC`);
@@ -441,15 +434,13 @@ async function main() {
     ]);
     flashLoanClient.repayFlashLoan(tx, flashRepayment as any, receipt, "usdc");
 
-    // H. Transfer remaining assets to user
-    // Following SDK repay pattern: loanCoin must be transferred after repay()
-    console.log(`  Step 8: Transfer remaining assets to user`);
-    tx.transferObjects(
-      [withdrawnCoinResult[0] as any, swappedUsdc as any, loanCoin as any],
-      userAddress
+    // H. Transfer remaining assets to user (both remaining collateral and USDC)
+    console.log(
+      `  Step 8: Transfer remaining ${supplySymbol} and USDC to user`
     );
+    tx.transferObjects([withdrawnCoin as any, swappedUsdc as any], userAddress);
 
-    // 6. Execute Transaction
+    // 7. Execute Transaction
     console.log(`\n🚀 Executing transaction...`);
     const result = await suiClient.signAndExecuteTransaction({
       transaction: tx,

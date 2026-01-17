@@ -5,7 +5,7 @@ import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { coinWithBalance, Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { MetaAg, getTokenPrice } from "@7kprotocol/sdk-ts";
-import { getReserveByCoinType } from "../src/lib/const";
+import { getReserveByCoinType } from "../../src/lib/suilend/const";
 
 const SUI_FULLNODE_URL =
   process.env.SUI_FULLNODE_URL || getFullnodeUrl("mainnet");
@@ -37,8 +37,7 @@ function formatUnits(
 
 async function main() {
   console.log("─".repeat(50));
-  console.log("  🔄 7k Swap Script (Execute)");
-  console.log("  ⚠️  WARNING: This will execute a REAL transaction!");
+  console.log("  🔄 7k Swap Script (Dry Run)");
   console.log("─".repeat(50));
 
   // 1. Setup
@@ -147,7 +146,7 @@ async function main() {
     );
     tx.transferObjects([coinOut], userAddress);
 
-    // 6. Dry Run first
+    // 6. Dry Run
     console.log(`\n🧪 Running dry-run...`);
     const res = await client.devInspectTransactionBlock({
       transactionBlock: tx,
@@ -156,29 +155,9 @@ async function main() {
 
     if (res.effects.status.status === "failure") {
       console.error(`❌ Dry-run failed:`, res.effects.status.error);
-      return;
-    }
-    console.log(`✅ Dry-run successful!`);
-
-    // 7. Execute Transaction
-    console.log(`\n🚀 Executing transaction...`);
-    const result = await client.signAndExecuteTransaction({
-      signer: keypair,
-      transaction: tx,
-      options: { showEffects: true },
-    });
-
-    if (result.effects?.status.status === "success") {
-      console.log(`\n✅ Swap successful!`);
-      console.log(`📋 Digest: ${result.digest}`);
-      console.log(
-        `💱 Swapped: ${formatUnits(
-          amountIn,
-          decimalsIn
-        )} ${symbolIn} → ~${formatUnits(rawOut, decimalsOut)} ${symbolOut}`
-      );
     } else {
-      console.error(`❌ Transaction failed:`, result.effects?.status.error);
+      console.log(`✅ Dry-run successful!`);
+      console.log(`\n💡 To execute real swap, use: npm run test:swap-exec`);
     }
 
     console.log(`\n` + "─".repeat(50));

@@ -10,8 +10,8 @@ import {
   LENDING_MARKET_TYPE,
 } from "@suilend/sdk";
 import { MetaAg, getTokenPrice } from "@7kprotocol/sdk-ts";
-import { ScallopFlashLoanClient } from "../src/lib/scallop";
-import { getReserveByCoinType, COIN_TYPES } from "../src/lib/const";
+import { ScallopFlashLoanClient } from "../../src/lib/scallop";
+import { getReserveByCoinType, COIN_TYPES } from "../../src/lib/suilend/const";
 
 const SUI_FULLNODE_URL =
   process.env.SUI_FULLNODE_URL || getFullnodeUrl("mainnet");
@@ -43,8 +43,7 @@ function formatUnits(
 
 async function main() {
   console.log("─".repeat(55));
-  console.log("  📈 Leverage Strategy (Execute)");
-  console.log("  ⚠️  WARNING: This will execute a REAL transaction!");
+  console.log("  📈 Leverage Strategy (Dry Run)");
   console.log("─".repeat(55));
 
   // 1. Setup
@@ -87,7 +86,8 @@ async function main() {
   // 2. Get config from .env.public
   const DEPOSIT_COIN_TYPE =
     process.env.LEVERAGE_DEPOSIT_COIN_TYPE || COIN_TYPES.LBTC;
-  const DEPOSIT_AMOUNT = process.env.LEVERAGE_DEPOSIT_AMOUNT || "1101";
+  const DEPOSIT_VALUE_USD = process.env.LEVERAGE_DEPOSIT_VALUE; // e.g., "1" for $1
+  let DEPOSIT_AMOUNT = process.env.LEVERAGE_DEPOSIT_AMOUNT || "1101";
   const MULTIPLIER = parseFloat(process.env.LEVERAGE_MULTIPLIER || "1.5");
 
   const normalizedDepositCoin = normalizeCoinType(DEPOSIT_COIN_TYPE);
@@ -97,6 +97,18 @@ async function main() {
 
   // 3. Calculate values using getTokenPrice
   const depositPrice = await getTokenPrice(normalizedDepositCoin);
+  const usdcPrice = await getTokenPrice(normalizeCoinType(USDC_COIN_TYPE));
+
+  if (DEPOSIT_VALUE_USD) {
+    console.log(`\n💲 Target Deposit Value: $${DEPOSIT_VALUE_USD}`);
+    // Amount = Value / Price
+    // Scale by decimals
+    const targetAmount = parseFloat(DEPOSIT_VALUE_USD) / depositPrice;
+    // Convert to integer units
+    const targetAmountRaw = Math.floor(targetAmount * Math.pow(10, decimals));
+    DEPOSIT_AMOUNT = targetAmountRaw.toString();
+    console.log(`   Calculated Amount: ${DEPOSIT_AMOUNT} (raw) for ${symbol}`);
+  }
 
   const depositAmountHuman = Number(DEPOSIT_AMOUNT) / Math.pow(10, decimals);
   const initialEquityUsd = depositAmountHuman * depositPrice;
@@ -238,11 +250,6 @@ async function main() {
     const isSui = normalizedDepositCoin.endsWith("::sui::SUI");
     let depositCoin: any;
 
-    console.log(`\n📋 Debug Info:`);
-    console.log(`   isSui: ${isSui}`);
-    console.log(`   normalizedDepositCoin: ${normalizedDepositCoin}`);
-    console.log(`   DEPOSIT_AMOUNT: ${DEPOSIT_AMOUNT}`);
-
     if (isSui) {
       // For SUI: split user's deposit amount from gas, then merge with swapped SUI
       console.log(
@@ -254,8 +261,12 @@ async function main() {
       tx.mergeCoins(userDeposit, [swappedAsset]);
       depositCoin = userDeposit;
     } else {
-      // For non-SUI: merge user's coins with swapped asset
-      console.log(`  Step 4: Merge user's ${symbol} with swapped ${symbol}`);
+      // For non-SUI:
+      // 1. Find coins
+      // 2. Merge all into one to ensure sufficient balance
+      // 3. Split the EXACT deposit amount
+      // 4. Merge split coin with swapped asset
+      console.log(`  Step 4: Prepare ${symbol} for deposit`);
       const userCoins = await suiClient.getCoins({
         owner: userAddress,
         coinType: normalizedDepositCoin,
@@ -275,8 +286,16 @@ async function main() {
           .map((c) => tx.object(c.coinObjectId));
         tx.mergeCoins(primaryCoin, otherCoins);
       }
-      tx.mergeCoins(primaryCoin, [swappedAsset]);
-      depositCoin = primaryCoin;
+
+      // Split the exact user contribution amount
+      console.log(`   Splitting ${DEPOSIT_AMOUNT} ${symbol} from user balance`);
+      const [userContribution] = tx.splitCoins(primaryCoin, [
+        BigInt(DEPOSIT_AMOUNT),
+      ]);
+
+      // Merge swapped asset into the contribution coin
+      tx.mergeCoins(userContribution, [swappedAsset]);
+      depositCoin = userContribution;
     }
 
     // E. Refresh oracles BEFORE deposit (required for both new and existing obligations)
@@ -310,11 +329,18 @@ async function main() {
     );
 
     // G. Calculate repayment amount (flash loan + fee)
-    const flashLoanFee = ScallopFlashLoanClient.calculateFee(BigInt(flashLoanUsdc));
+    const flashLoanFee = ScallopFlashLoanClient.calculateFee(
+      BigInt(flashLoanUsdc)
+    );
     const repaymentAmount = BigInt(flashLoanUsdc) + flashLoanFee;
 
     // Borrow USDC to repay flash loan (no refresh - already done above)
-    console.log(`  Step 7: Borrow ${formatUnits(repaymentAmount, 6)} USDC (includes flash loan fee)`);
+    console.log(
+      `  Step 7: Borrow ${formatUnits(
+        repaymentAmount,
+        6
+      )} USDC (includes flash loan fee)`
+    );
     const borrowedUsdc = await suilendClient.borrow(
       obligationOwnerCap,
       obligationId || "0x0",
@@ -334,23 +360,17 @@ async function main() {
       tx.transferObjects([obligationOwnerCap], userAddress);
     }
 
-    // 6. Execute Transaction
-    console.log(`\n🚀 Executing transaction...`);
-    const result = await suiClient.signAndExecuteTransaction({
-      transaction: tx,
-      signer: keypair,
-      options: { showEffects: true },
+    // 6. Dry Run
+    console.log(`\n🧪 Running dry-run...`);
+    const dryRunResult = await suiClient.dryRunTransactionBlock({
+      transactionBlock: await tx.build({ client: suiClient }),
     });
 
-    if (result.effects?.status.status === "success") {
-      console.log(`\n✅ Leverage position created successfully!`);
-      console.log(`📋 Digest: ${result.digest}`);
-      console.log(`\n📊 Final Position:`);
-      console.log(`   Collateral: ~$${totalPositionUsd.toFixed(2)} ${symbol}`);
-      console.log(`   Debt:       ~$${debtUsd.toFixed(2)} USDC`);
-      console.log(`   Leverage:   ${MULTIPLIER}x`);
+    if (dryRunResult.effects.status.status === "success") {
+      console.log(`✅ Dry-run successful!`);
+      console.log(`\n💡 To execute, use: npm run test:suilend-leverage-exec`);
     } else {
-      console.error(`❌ Transaction failed:`, result.effects?.status.error);
+      console.error(`❌ Dry-run failed:`, dryRunResult.effects.status.error);
     }
 
     console.log(`\n` + "─".repeat(55));

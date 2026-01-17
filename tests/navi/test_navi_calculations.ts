@@ -8,7 +8,7 @@ import {
   fetchNaviUserData,
   fetchNaviAccountSummary,
   calculateLeverageMultiplier,
-} from "../src/lib/navi_calculations";
+} from "../../src/lib/navi_calculations";
 
 async function main() {
   console.log("─".repeat(55));

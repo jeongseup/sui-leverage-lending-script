@@ -10,7 +10,8 @@ import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getTokenPrice } from "@7kprotocol/sdk-ts";
-import { getReserveByCoinType } from "../src/lib/const";
+import { getReserveByCoinType } from "../../src/lib/suilend/const";
+import { normalizeCoinType, formatUnits } from "../../src/lib/utils";
 
 // Config from .env.public
 const SUI_COIN_TYPE = "0x2::sui::SUI";
@@ -19,30 +20,6 @@ const DEPOSIT_COIN_TYPE =
   "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC";
 const SUI_FULLNODE_URL =
   process.env.SUI_FULLNODE_URL || getFullnodeUrl("mainnet");
-
-function normalizeCoinType(coinType: string) {
-  const parts = coinType.split("::");
-  if (parts.length !== 3) return coinType;
-  let pkg = parts[0].replace("0x", "");
-  pkg = pkg.padStart(64, "0");
-  return `0x${pkg}::${parts[1]}::${parts[2]}`;
-}
-
-function formatUnits(
-  amount: string | number | bigint,
-  decimals: number
-): string {
-  const s = amount.toString();
-  if (decimals === 0) return s;
-  const pad = s.padStart(decimals + 1, "0");
-  const transition = pad.length - decimals;
-  return (
-    `${pad.slice(0, transition)}.${pad.slice(transition)}`.replace(
-      /\.?0+$/,
-      ""
-    ) || "0"
-  );
-}
 
 async function main() {
   console.log("─".repeat(50));

@@ -13,11 +13,11 @@ import {
   normalizeCoinType,
 } from "@naviprotocol/lending";
 import { MetaAg, getTokenPrice } from "@7kprotocol/sdk-ts";
-import { ScallopFlashLoanClient } from "../src/lib/scallop";
-import { getReserveByCoinType, COIN_TYPES } from "../src/lib/const";
+import { ScallopFlashLoanClient } from "../../src/lib/scallop";
+import { getReserveByCoinType, COIN_TYPES } from "../../src/lib/suilend/const";
 
 /**
- * Navi Leverage Strategy with Scallop Flash Loan + 7k Swap
+ * Navi Leverage Strategy with Scallop Flash Loan + 7k Swap (Execute)
  *
  * Flow:
  * 1. Flash loan USDC from Scallop
@@ -49,7 +49,8 @@ function formatUnits(
 
 async function main() {
   console.log("─".repeat(55));
-  console.log("  📈 Navi Leverage Strategy (Dry Run)");
+  console.log("  📈 Navi Leverage Strategy (Execute)");
+  console.log("  ⚠️  WARNING: This will execute a REAL transaction!");
   console.log("─".repeat(55));
 
   // 1. Setup
@@ -343,14 +344,17 @@ async function main() {
     console.log(`  Step 7: Repay flash loan`);
     flashLoanClient.repayFlashLoan(tx, borrowedUsdc as any, receipt, "usdc");
 
-    // 8. Dry Run
-    console.log(`\n🧪 Running dry-run...`);
-    const dryRunResult = await suiClient.dryRunTransactionBlock({
-      transactionBlock: await tx.build({ client: suiClient }),
+    // 8. Execute Transaction
+    console.log(`\n🚀 Executing transaction...`);
+    const result = await suiClient.signAndExecuteTransaction({
+      transaction: tx,
+      signer: keypair,
+      options: { showEffects: true },
     });
 
-    if (dryRunResult.effects.status.status === "success") {
-      console.log(`✅ Dry-run successful!`);
+    if (result.effects?.status.status === "success") {
+      console.log(`\n✅ Leverage position created successfully!`);
+      console.log(`📋 Digest: ${result.digest}`);
       console.log(`\n📊 Final Position:`);
       console.log(`─`.repeat(55));
       console.log(
@@ -367,11 +371,8 @@ async function main() {
       );
       console.log(`  Leverage:   ${MULTIPLIER}x`);
       console.log(`─`.repeat(55));
-      console.log(
-        `\nGas used: ${dryRunResult.effects.gasUsed.computationCost}`
-      );
     } else {
-      console.error(`❌ Dry-run failed:`, dryRunResult.effects.status.error);
+      console.error(`❌ Transaction failed:`, result.effects?.status.error);
     }
 
     console.log(`\n` + "─".repeat(55));

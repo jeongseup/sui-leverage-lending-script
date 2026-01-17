@@ -13,8 +13,8 @@ import {
   normalizeCoinType,
 } from "@naviprotocol/lending";
 import { MetaAg, getTokenPrice } from "@7kprotocol/sdk-ts";
-import { ScallopFlashLoanClient } from "../src/lib/scallop";
-import { getReserveByCoinType, COIN_TYPES } from "../src/lib/const";
+import { ScallopFlashLoanClient } from "../../src/lib/scallop";
+import { getReserveByCoinType, COIN_TYPES } from "../../src/lib/suilend/const";
 
 /**
  * Navi Deleverage Strategy - Close leveraged position

@@ -10,7 +10,7 @@ import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getTokenPrice } from "@7kprotocol/sdk-ts";
-import { getReserveByCoinType } from "../src/lib/const";
+import { getReserveByCoinType } from "../../src/lib/suilend/const";
 
 // Config from .env.public
 const BORROW_COIN_TYPE =

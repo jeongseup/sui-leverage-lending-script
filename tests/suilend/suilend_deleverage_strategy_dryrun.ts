@@ -10,8 +10,8 @@ import {
   LENDING_MARKET_TYPE,
 } from "@suilend/sdk";
 import { MetaAg, getTokenPrice } from "@7kprotocol/sdk-ts";
-import { ScallopFlashLoanClient } from "../src/lib/scallop";
-import { getReserveByCoinType, COIN_TYPES } from "../src/lib/const";
+import { ScallopFlashLoanClient } from "../../src/lib/scallop";
+import { getReserveByCoinType, COIN_TYPES } from "../../src/lib/suilend/const";
 
 /**
  * Suilend Deleverage Strategy - Close leveraged position (Dry Run)
