@@ -50,8 +50,8 @@ export async function calculateDeleverageEstimate(
   const flashLoanFee = ScallopFlashLoanClient.calculateFee(flashLoanUsdc);
   const totalRepayment = flashLoanUsdc + flashLoanFee;
 
-  // Get swap rate
-  const withdrawAmount = (supplyAmount * 999n) / 1000n; // 99.9% to avoid dust
+  // Get swap rate - use full collateral amount
+  const withdrawAmount = supplyAmount; // Withdraw ALL collateral
   const fullSwapQuotes = await swapClient.quote({
     amountIn: withdrawAmount.toString(),
     coinTypeIn: supplyCoinType,
@@ -148,8 +148,8 @@ export async function buildDeleverageTransaction(
   // 3. Repay debt using flash loan
   await protocol.repay(tx, USDC_COIN_TYPE, loanCoin, userAddress);
 
-  // 4. Withdraw collateral (99.9% to avoid dust)
-  const withdrawAmount = (supplyAmount * 999n) / 1000n;
+  // 4. Withdraw ALL collateral
+  const withdrawAmount = supplyAmount;
   const withdrawnCoin = await protocol.withdraw(
     tx,
     supplyCoinType,

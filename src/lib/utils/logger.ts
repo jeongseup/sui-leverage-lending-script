@@ -17,7 +17,7 @@ export function formatAmount(
   decimals: number,
 ): string {
   const num = Number(amount) / Math.pow(10, decimals);
-  return num.toFixed(Math.min(decimals, 6));
+  return num.toFixed(Math.min(decimals, 8)); // Show up to 8 decimals
 }
 
 export function formatUsd(value: number): string {
