@@ -192,9 +192,15 @@ export async function buildDeleverageTransaction(
   flashLoanClient.repayFlashLoan(tx, flashRepayment as any, receipt, "usdc");
 
   // 7. Transfer remaining to user
-  // Note: loanCoin must be transferred after repay() per Suilend SDK pattern
-  tx.transferObjects(
-    [withdrawnCoin as any, swappedUsdc as any, loanCoin as any],
-    userAddress,
-  );
+  // Some protocols consume the repayment coin entirely, others return unused portion
+  if (protocol.consumesRepaymentCoin) {
+    // Protocol consumed loanCoin in repay(), don't transfer it
+    tx.transferObjects([withdrawnCoin as any, swappedUsdc as any], userAddress);
+  } else {
+    // Protocol left remaining balance in loanCoin, transfer it
+    tx.transferObjects(
+      [withdrawnCoin as any, swappedUsdc as any, loanCoin as any],
+      userAddress,
+    );
+  }
 }

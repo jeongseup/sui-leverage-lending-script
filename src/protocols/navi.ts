@@ -31,6 +31,7 @@ const NAVI_BALANCE_DECIMALS = 9;
  */
 export class NaviAdapter implements ILendingProtocol {
   readonly name = "navi";
+  readonly consumesRepaymentCoin = true; // Navi's repayCoinPTB consumes entire coin
   private suiClient!: SuiClient;
   private pools: any[] = [];
   private priceFeeds: any[] = [];
@@ -68,7 +69,7 @@ export class NaviAdapter implements ILendingProtocol {
   private getPriceFeed(coinType: string) {
     const normalized = normalizeCoinType(coinType);
     return this.priceFeeds.find(
-      (f: any) => normalizeCoinType(f.coinType) === normalized
+      (f: any) => normalizeCoinType(f.coinType) === normalized,
     );
   }
 
@@ -79,7 +80,7 @@ export class NaviAdapter implements ILendingProtocol {
     if (lendingState.length === 0) return null;
 
     const activePositions = lendingState.filter(
-      (p) => BigInt(p.supplyBalance) > 0 || BigInt(p.borrowBalance) > 0
+      (p) => BigInt(p.supplyBalance) > 0 || BigInt(p.borrowBalance) > 0,
     );
 
     if (activePositions.length === 0) return null;
@@ -149,7 +150,7 @@ export class NaviAdapter implements ILendingProtocol {
     tx: Transaction,
     coin: any,
     coinType: string,
-    userAddress: string
+    userAddress: string,
   ): Promise<void> {
     this.ensureInitialized();
 
@@ -168,7 +169,7 @@ export class NaviAdapter implements ILendingProtocol {
     tx: Transaction,
     coinType: string,
     amount: string,
-    userAddress: string
+    userAddress: string,
   ): Promise<any> {
     this.ensureInitialized();
 
@@ -181,7 +182,7 @@ export class NaviAdapter implements ILendingProtocol {
       tx as any,
       pool,
       Number(amount),
-      { env: "prod" }
+      { env: "prod" },
     );
 
     return withdrawnCoin;
@@ -192,7 +193,7 @@ export class NaviAdapter implements ILendingProtocol {
     coinType: string,
     amount: string,
     userAddress: string,
-    skipOracle = false
+    skipOracle = false,
   ): Promise<any> {
     this.ensureInitialized();
 
@@ -212,7 +213,7 @@ export class NaviAdapter implements ILendingProtocol {
     tx: Transaction,
     coinType: string,
     coin: any,
-    userAddress: string
+    userAddress: string,
   ): Promise<void> {
     this.ensureInitialized();
 
@@ -229,7 +230,7 @@ export class NaviAdapter implements ILendingProtocol {
   async refreshOracles(
     tx: Transaction,
     coinTypes: string[],
-    userAddress: string
+    userAddress: string,
   ): Promise<void> {
     this.ensureInitialized();
 

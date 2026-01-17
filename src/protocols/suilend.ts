@@ -25,6 +25,7 @@ const WAD = 10n ** 18n;
  */
 export class SuilendAdapter implements ILendingProtocol {
   readonly name = "suilend";
+  readonly consumesRepaymentCoin = false; // Suilend returns unused portion
   private client!: SuilendClient;
   private suiClient!: SuiClient;
   private initialized = false;
@@ -34,7 +35,7 @@ export class SuilendAdapter implements ILendingProtocol {
     this.client = await SuilendClient.initialize(
       LENDING_MARKET_ID,
       LENDING_MARKET_TYPE,
-      suiClient
+      suiClient,
     );
     this.initialized = true;
   }
@@ -42,7 +43,7 @@ export class SuilendAdapter implements ILendingProtocol {
   private ensureInitialized() {
     if (!this.initialized) {
       throw new Error(
-        "SuilendAdapter not initialized. Call initialize() first."
+        "SuilendAdapter not initialized. Call initialize() first.",
       );
     }
   }
@@ -53,7 +54,7 @@ export class SuilendAdapter implements ILendingProtocol {
     const caps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
 
     if (caps.length === 0) return null;
@@ -61,7 +62,7 @@ export class SuilendAdapter implements ILendingProtocol {
     const obligation = await SuilendClient.getObligation(
       caps[0].obligationId,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
 
     if (!obligation) return null;
@@ -132,7 +133,7 @@ export class SuilendAdapter implements ILendingProtocol {
     const caps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
     return caps.length > 0;
   }
@@ -141,14 +142,14 @@ export class SuilendAdapter implements ILendingProtocol {
     tx: Transaction,
     coin: any,
     coinType: string,
-    userAddress: string
+    userAddress: string,
   ): Promise<void> {
     this.ensureInitialized();
 
     const caps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
 
     let obligationOwnerCap: any;
@@ -173,14 +174,14 @@ export class SuilendAdapter implements ILendingProtocol {
     tx: Transaction,
     coinType: string,
     amount: string,
-    userAddress: string
+    userAddress: string,
   ): Promise<any> {
     this.ensureInitialized();
 
     const caps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
 
     if (caps.length === 0) {
@@ -194,7 +195,7 @@ export class SuilendAdapter implements ILendingProtocol {
       coinType,
       amount,
       tx,
-      false // Skip refresh, assume already done
+      false, // Skip refresh, assume already done
     );
 
     return result[0];
@@ -205,14 +206,14 @@ export class SuilendAdapter implements ILendingProtocol {
     coinType: string,
     amount: string,
     userAddress: string,
-    skipOracle = false
+    skipOracle = false,
   ): Promise<any> {
     this.ensureInitialized();
 
     const caps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
 
     if (caps.length === 0) {
@@ -226,7 +227,7 @@ export class SuilendAdapter implements ILendingProtocol {
       coinType,
       amount,
       tx,
-      skipOracle
+      skipOracle,
     );
 
     return result[0];
@@ -236,14 +237,14 @@ export class SuilendAdapter implements ILendingProtocol {
     tx: Transaction,
     coinType: string,
     coin: any,
-    userAddress: string
+    userAddress: string,
   ): Promise<void> {
     this.ensureInitialized();
 
     const caps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
 
     if (caps.length === 0) {
@@ -256,21 +257,21 @@ export class SuilendAdapter implements ILendingProtocol {
   async refreshOracles(
     tx: Transaction,
     coinTypes: string[],
-    userAddress: string
+    userAddress: string,
   ): Promise<void> {
     this.ensureInitialized();
 
     const caps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
 
     if (caps.length > 0) {
       const obligation = await SuilendClient.getObligation(
         caps[0].obligationId,
         [LENDING_MARKET_TYPE],
-        this.suiClient
+        this.suiClient,
       );
       await this.client.refreshAll(tx, obligation, coinTypes);
     } else {
@@ -299,7 +300,7 @@ export class SuilendAdapter implements ILendingProtocol {
     const caps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      this.suiClient
+      this.suiClient,
     );
     return caps.length > 0 ? caps[0] : null;
   }

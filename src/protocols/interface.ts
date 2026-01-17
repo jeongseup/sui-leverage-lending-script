@@ -16,6 +16,13 @@ export interface ILendingProtocol {
   readonly name: string;
 
   /**
+   * Whether the protocol's repay function consumes the entire coin
+   * - true: repay() consumes the coin entirely (e.g., Navi)
+   * - false: repay() returns unused portion in the coin (e.g., Suilend)
+   */
+  readonly consumesRepaymentCoin: boolean;
+
+  /**
    * Initialize the protocol client
    * Must be called before using other methods
    */
@@ -45,7 +52,7 @@ export interface ILendingProtocol {
     tx: Transaction,
     coin: any,
     coinType: string,
-    userAddress: string
+    userAddress: string,
   ): Promise<void>;
 
   /**
@@ -60,7 +67,7 @@ export interface ILendingProtocol {
     tx: Transaction,
     coinType: string,
     amount: string,
-    userAddress: string
+    userAddress: string,
   ): Promise<any>;
 
   /**
@@ -77,7 +84,7 @@ export interface ILendingProtocol {
     coinType: string,
     amount: string,
     userAddress: string,
-    skipOracle?: boolean
+    skipOracle?: boolean,
   ): Promise<any>;
 
   /**
@@ -91,7 +98,7 @@ export interface ILendingProtocol {
     tx: Transaction,
     coinType: string,
     coin: any,
-    userAddress: string
+    userAddress: string,
   ): Promise<void>;
 
   /**
@@ -104,7 +111,7 @@ export interface ILendingProtocol {
   refreshOracles(
     tx: Transaction,
     coinTypes: string[],
-    userAddress: string
+    userAddress: string,
   ): Promise<void>;
 
   /**
