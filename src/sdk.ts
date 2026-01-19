@@ -386,6 +386,34 @@ export class DefiDashSDK {
     return this.getProtocol(protocol).hasPosition(this.userAddress);
   }
 
+  /**
+   * Get max borrowable amount for an asset
+   */
+  async getMaxBorrowable(
+    protocol: LendingProtocol,
+    coinType: string,
+  ): Promise<string> {
+    this.ensureInitialized();
+    return this.getProtocol(protocol).getMaxBorrowableAmount(
+      this.userAddress,
+      this.resolveCoinType(coinType),
+    );
+  }
+
+  /**
+   * Get max withdrawable amount for an asset
+   */
+  async getMaxWithdrawable(
+    protocol: LendingProtocol,
+    coinType: string,
+  ): Promise<string> {
+    this.ensureInitialized();
+    return this.getProtocol(protocol).getMaxWithdrawableAmount(
+      this.userAddress,
+      this.resolveCoinType(coinType),
+    );
+  }
+
   // ============================================================================
   // Aggregation Methods
   // ============================================================================

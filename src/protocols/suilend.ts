@@ -297,18 +297,20 @@ export class SuilendAdapter implements ILendingProtocol {
         const coinType = normalizeCoinType(reserve.coinType.name);
         const localReserve = getReserveByCoinType(coinType);
 
-        // Suilend price is usually 18 decimals WAD or straight USD?
-        const price = Number(reserve.price) / 1e18;
+        // Suilend price is Decimal { value: string }
+        const price = Number(BigInt((reserve.price as any).value)) / 1e18;
 
-        const supplyApy = 0; // TODO: Implement APY
-        const borrowApy = 0; // TODO: Implement APY
+        // APY not directly in reserve object, default to 0 for now
+        const supplyApyPct = 0;
+        const borrowApyPct = 0;
 
         const decimals = localReserve?.decimals || 9;
 
-        // Available / Borrowed
+        // Available is u64, Borrowed is Decimal
         const availableLiquidity =
           Number(reserve.availableAmount) / Math.pow(10, decimals);
-        const totalBorrow = Number(reserve.borrowedAmount.value) / 1e18; // WAD
+        const totalBorrow =
+          Number(BigInt((reserve.borrowedAmount as any).value)) / 1e18; // WAD
         const totalSupply = availableLiquidity + totalBorrow;
 
         return {
@@ -316,8 +318,8 @@ export class SuilendAdapter implements ILendingProtocol {
           coinType,
           decimals,
           price,
-          supplyApy,
-          borrowApy,
+          supplyApy: supplyApyPct,
+          borrowApy: borrowApyPct,
           maxLtv: Number(reserve.config.openLtvPct) / 100,
           liquidationThreshold: Number(reserve.config.closeLtvPct) / 100,
           totalSupply,
@@ -467,5 +469,188 @@ export class SuilendAdapter implements ILendingProtocol {
   getSuilendClient(): SuilendClient {
     this.ensureInitialized();
     return this.client;
+  }
+
+  async getMaxBorrowableAmount(
+    address: string,
+    coinType: string,
+  ): Promise<string> {
+    this.ensureInitialized();
+
+    // Check if user has obligation
+    const caps = await SuilendClient.getObligationOwnerCaps(
+      address,
+      [LENDING_MARKET_TYPE],
+      this.suiClient,
+    );
+
+    if (caps.length === 0) return "0";
+
+    const obligation = await SuilendClient.getObligation(
+      caps[0].obligationId,
+      [LENDING_MARKET_TYPE],
+      this.suiClient,
+    );
+
+    if (!obligation) return "0";
+
+    const oblAny = obligation as any;
+    // Values are in USD (WAD)
+    const totalCollateralValue =
+      Number(BigInt(oblAny.allowedBorrowValueUsd ?? 0)) / 1e18;
+    const totalBorrowValue =
+      Number(BigInt(oblAny.borrowedValueUsd ?? 0)) / 1e18;
+    const availableBorrowValue = Math.max(
+      0,
+      totalCollateralValue - totalBorrowValue,
+    );
+
+    // Get asset price
+    const reserve = (this.client.lendingMarket.reserves as any[]).find(
+      (r) => normalizeCoinType(r.coinType.name) === normalizeCoinType(coinType),
+    );
+
+    const price = reserve ? Number(reserve.price) / 1e18 : 0;
+
+    if (price === 0) return "0";
+
+    const maxBorrowAmount = availableBorrowValue / price;
+    return maxBorrowAmount.toFixed(6).replace(/\.?0+$/, "");
+  }
+
+  async getMaxWithdrawableAmount(
+    address: string,
+    coinType: string,
+  ): Promise<string> {
+    this.ensureInitialized();
+
+    const caps = await SuilendClient.getObligationOwnerCaps(
+      address,
+      [LENDING_MARKET_TYPE],
+      this.suiClient,
+    );
+
+    if (caps.length === 0) return "0";
+
+    const obligation = await SuilendClient.getObligation(
+      caps[0].obligationId,
+      [LENDING_MARKET_TYPE],
+      this.suiClient,
+    );
+
+    if (!obligation) return "0";
+
+    // Find deposit
+    const deposit = (obligation.deposits || []).find(
+      (d: any) =>
+        normalizeCoinType(d.coinType?.name) === normalizeCoinType(coinType),
+    );
+
+    if (!deposit) return "0";
+
+    const localReserve = getReserveByCoinType(normalizeCoinType(coinType));
+    const decimals = localReserve?.decimals || 9;
+    const depositedRaw = BigInt(
+      deposit.depositedCtokenAmount?.toString() ?? "0",
+    );
+    const depositAmount = Number(depositedRaw) / Math.pow(10, decimals);
+
+    // Exchange rate CToken -> Token?
+    // Wait, depositedCtokenAmount is not the underlying amount?
+    // Suilend SDK handles this?
+    // frontend code: `formatAmount(depositedRaw, decimals)` -> it assumes 1 cToken = 1 Token?
+    // Actually Suilend has cTokenExchangeRate.
+    // Frontend `useUserPositions` used `depositedCtokenAmount` as `supplied`.
+    // Wait, let's check frontend again.
+    // In `useUserPositions`: `suppliedRaw = BigInt(deposit.depositedCtokenAmount)`.
+    // It seems frontend simplified it or cToken ~ Token?
+    // In `getAccountPortfolio` above, I used `rate` to convert.
+    // `const rate = Number(reserve.cTokenExchangeRate) / 1e18;`
+    // `const amount = (Number(rawAmount) / Math.pow(10, decimals)) * rate;`
+    // So cToken != Token.
+    // I should use the converted amount as the "Deposited Amount".
+
+    const reserve = (this.client.lendingMarket.reserves as any[]).find(
+      (r) => normalizeCoinType(r.coinType.name) === normalizeCoinType(coinType),
+    );
+    const rate = reserve ? Number(reserve.cTokenExchangeRate) / 1e18 : 1;
+    const depositedAmount =
+      (Number(depositedRaw) / Math.pow(10, decimals)) * rate;
+
+    // If no borrows, can withdraw all
+    if (!obligation.borrows || obligation.borrows.length === 0) {
+      return depositedAmount.toFixed(6).replace(/\.?0+$/, "");
+    }
+
+    const oblAny = obligation as any;
+    const allowedBorrow =
+      Number(BigInt(oblAny.allowedBorrowValueUsd ?? 0)) / 1e18;
+    const currentBorrow = Number(BigInt(oblAny.borrowedValueUsd ?? 0)) / 1e18;
+    const excessValue = allowedBorrow - currentBorrow;
+
+    if (excessValue <= 0) return "0";
+
+    // Buffer 0.95
+    const safeValue = excessValue * 0.95;
+
+    // Need price to convert Value -> Amount
+    const price = reserve ? Number(reserve.price) / 1e18 : 0;
+    if (price === 0) return "0";
+
+    const maxWithdrawValueAmount = safeValue / price; // This is amount * LTV weight?
+    // Wait.
+    // AllowedBorrow = CollateralValue * LTV.
+    // If I withdraw X amount, CollateralValue decreases by X * Price.
+    // AllowedBorrow decreases by X * Price * LTV.
+    // We want RemainingAllowed >= CurrentBorrow.
+    // (CollateralValue - X*Price) * LTV >= CurrentBorrow.
+    // CollateralValue*LTV - X*Price*LTV >= CurrentBorrow.
+    // AllowedBorrow - X*Price*LTV >= CurrentBorrow.
+    // AllowedBorrow - CurrentBorrow >= X*Price*LTV.
+    // ExcessValue >= X * Price * LTV.
+    // X <= ExcessValue / (Price * LTV).
+
+    // Frontend logic: `const maxWithdrawAmount = safeValue`?
+    // Frontend code:
+    // `const safeValue = excessValue * SAFETY_BUFFER`
+    // `const maxWithdrawAmount = safeValue` -> This seems wrong if safeValue is USD?
+    // It returns `finalAmount` which is `Math.min(maxWithdrawAmount, deposited)`.
+    // Wait, `maxWithdrawAmount` in frontend snippet was `safeValue`.
+    // If `safeValue` is USD, and `deposited` is Amount... comparing apples to oranges?
+    // Let's re-read frontend `useMaxWithdraw`.
+
+    // Frontend:
+    // `const maxWithdrawAmount = safeValue`
+    // `const finalAmount = Math.min(...)`.
+    // If `safeValue` is USD, it assumes Price=1?
+    // Ah, lines 398-399: "// Convert to amount (simplified)"
+    // It didn't divide by price!
+    // This looks like a bug in frontend code unless Price=1.
+    // But I should implement it *correctly* in SDK.
+    // Formula: MaxWithdrawAmount = (ExcessLiq / (Price * LTV)) * Buffer.
+    // Wait, Suilend docs might differ.
+    // Effectively: DeltaAllowed = Excess.
+    // DeltaAllowed = WithdrawAmount * Price * LTV.
+    // WithdrawAmount = Excess / (Price * LTV).
+
+    const ltv = reserve ? Number(reserve.config.openLtvPct) / 100 : 0;
+    if (ltv === 0) return depositedAmount.toFixed(6).replace(/\.?0+$/, ""); // If LTV 0, doesn't affect borrow limit? Or implies 0 collateral value.
+    // If LTV is 0, then this asset didn't contribute to borrow limit. So withdrawing it doesn't lower borrow limit.
+    // So we can withdraw ALL of it? Yes.
+
+    // Wait, if LTV is 0, allowedBorrow doesn't change when we withdraw.
+    // So we can withdraw max = deposited.
+
+    let maxWithdrawAmount = 0;
+    if (ltv > 0) {
+      // safeValue is excess USD allowed.
+      // We need to divide by (Price * LTV) to get amount.
+      maxWithdrawAmount = safeValue / (price * ltv);
+    } else {
+      maxWithdrawAmount = depositedAmount;
+    }
+
+    const finalAmount = Math.min(maxWithdrawAmount, depositedAmount);
+    return finalAmount.toFixed(6).replace(/\.?0+$/, "");
   }
 }

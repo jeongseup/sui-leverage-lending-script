@@ -420,4 +420,24 @@ export class NaviAdapter implements ILendingProtocol {
     this.ensureInitialized();
     return this.pools;
   }
+
+  async getMaxBorrowableAmount(
+    address: string,
+    coinType: string,
+  ): Promise<string> {
+    // TODO: Implement for Navi
+    throw new Error(
+      "Methods getMaxBorrowableAmount not implemented for Navi yet",
+    );
+  }
+
+  async getMaxWithdrawableAmount(
+    address: string,
+    coinType: string,
+  ): Promise<string> {
+    // TODO: Implement for Navi
+    throw new Error(
+      "Methods getMaxWithdrawableAmount not implemented for Navi yet",
+    );
+  }
 }

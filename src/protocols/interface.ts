@@ -131,6 +131,20 @@ export interface ILendingProtocol {
    * @param address - User address
    */
   getAccountPortfolio(address: string): Promise<AccountPortfolio>;
+
+  /**
+   * Calculate max borrowable amount for an asset
+   * @param address - User address
+   * @param coinType - Coin type using full address
+   */
+  getMaxBorrowableAmount(address: string, coinType: string): Promise<string>;
+
+  /**
+   * Calculate max withdrawable amount for an asset
+   * @param address - User address
+   * @param coinType - Coin type using full address
+   */
+  getMaxWithdrawableAmount(address: string, coinType: string): Promise<string>;
 }
 
 /**
