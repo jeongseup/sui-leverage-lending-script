@@ -12,7 +12,15 @@ import {
   LENDING_MARKET_TYPE,
 } from "@suilend/sdk";
 import { ILendingProtocol, ReserveInfo } from "./interface";
-import { PositionInfo, AssetPosition, USDC_COIN_TYPE } from "../types";
+import {
+  PositionInfo,
+  AssetPosition,
+  USDC_COIN_TYPE,
+  MarketAsset,
+  AccountPortfolio,
+  LendingProtocol,
+  Position,
+} from "../types";
 import { normalizeCoinType, formatUnits } from "../lib/utils";
 import { getReserveByCoinType, SUILEND_RESERVES } from "../lib/suilend/const";
 import { getTokenPrice } from "@7kprotocol/sdk-ts";
@@ -278,6 +286,154 @@ export class SuilendAdapter implements ILendingProtocol {
       // For new obligations, just refresh reserves
       await this.client.refreshAll(tx, undefined, coinTypes);
     }
+  }
+
+  async getMarkets(): Promise<MarketAsset[]> {
+    this.ensureInitialized();
+    const reserves = this.client.lendingMarket.reserves as any[];
+
+    return Promise.all(
+      reserves.map(async (reserve) => {
+        const coinType = normalizeCoinType(reserve.coinType.name);
+        const localReserve = getReserveByCoinType(coinType);
+
+        // Suilend price is usually 18 decimals WAD or straight USD?
+        const price = Number(reserve.price) / 1e18;
+
+        const supplyApy = 0; // TODO: Implement APY
+        const borrowApy = 0; // TODO: Implement APY
+
+        const decimals = localReserve?.decimals || 9;
+
+        // Available / Borrowed
+        const availableLiquidity =
+          Number(reserve.availableAmount) / Math.pow(10, decimals);
+        const totalBorrow = Number(reserve.borrowedAmount.value) / 1e18; // WAD
+        const totalSupply = availableLiquidity + totalBorrow;
+
+        return {
+          symbol: localReserve?.symbol || "UNKNOWN",
+          coinType,
+          decimals,
+          price,
+          supplyApy,
+          borrowApy,
+          maxLtv: Number(reserve.config.openLtvPct) / 100,
+          liquidationThreshold: Number(reserve.config.closeLtvPct) / 100,
+          totalSupply,
+          totalBorrow,
+          availableLiquidity,
+        };
+      }),
+    );
+  }
+
+  async getAccountPortfolio(address: string): Promise<AccountPortfolio> {
+    this.ensureInitialized();
+
+    // Reuse specific obligation logic
+    const caps = await SuilendClient.getObligationOwnerCaps(
+      address,
+      [LENDING_MARKET_TYPE],
+      this.suiClient,
+    );
+
+    if (caps.length === 0) {
+      return {
+        protocol: LendingProtocol.Suilend,
+        address,
+        healthFactor: Infinity,
+        netValueUsd: 0,
+        totalCollateralUsd: 0,
+        totalDebtUsd: 0,
+        positions: [],
+      };
+    }
+
+    const obligation = await SuilendClient.getObligation(
+      caps[0].obligationId,
+      [LENDING_MARKET_TYPE],
+      this.suiClient,
+    );
+
+    const positions: Position[] = [];
+    let totalCollateralUsd = 0;
+    let totalDebtUsd = 0;
+
+    if (obligation) {
+      const deposits = obligation.deposits || [];
+      for (const d of deposits) {
+        const coinType = normalizeCoinType((d as any).coinType.name);
+        const reserve = (this.client.lendingMarket.reserves as any[]).find(
+          (r) => normalizeCoinType(r.coinType.name) === coinType,
+        );
+        if (!reserve) continue;
+
+        const localReserve = getReserveByCoinType(coinType);
+        const decimals = localReserve?.decimals || 9;
+        const symbol = localReserve?.symbol || "UNKNOWN";
+
+        const price = Number(reserve.price) / 1e18;
+        const rate = Number(reserve.cTokenExchangeRate) / 1e18;
+        const rawAmount = BigInt((d as any).depositedCtokenAmount);
+        const amount = (Number(rawAmount) / Math.pow(10, decimals)) * rate;
+
+        const valueUsd = amount * price;
+        totalCollateralUsd += valueUsd;
+
+        positions.push({
+          symbol,
+          coinType,
+          side: "supply",
+          amount,
+          valueUsd,
+          apy: 0,
+        });
+      }
+
+      const borrows = obligation.borrows || [];
+      for (const b of borrows) {
+        const coinType = normalizeCoinType((b as any).coinType.name);
+        const reserve = (this.client.lendingMarket.reserves as any[]).find(
+          (r) => normalizeCoinType(r.coinType.name) === coinType,
+        );
+        if (!reserve) continue;
+
+        const localReserve = getReserveByCoinType(coinType);
+        const decimals = localReserve?.decimals || 9;
+        const symbol = localReserve?.symbol || "UNKNOWN";
+
+        const price = Number(reserve.price) / 1e18;
+
+        const rawAmount = BigInt((b as any).borrowedAmount.value);
+        const amount = Number(rawAmount) / 1e18;
+
+        const valueUsd = amount * price;
+        totalDebtUsd += valueUsd;
+
+        positions.push({
+          symbol,
+          coinType,
+          side: "borrow",
+          amount,
+          valueUsd,
+          apy: 0,
+        });
+      }
+    }
+
+    const healthFactor =
+      totalDebtUsd > 0 ? totalCollateralUsd / totalDebtUsd : Infinity;
+
+    return {
+      protocol: LendingProtocol.Suilend,
+      address,
+      healthFactor,
+      netValueUsd: totalCollateralUsd - totalDebtUsd,
+      totalCollateralUsd,
+      totalDebtUsd,
+      positions,
+    };
   }
 
   async getReserveInfo(coinType: string): Promise<ReserveInfo | undefined> {

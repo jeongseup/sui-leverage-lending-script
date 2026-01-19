@@ -181,3 +181,49 @@ export const SUI_COIN_TYPE =
 
 export const DEFAULT_7K_PARTNER =
   "0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf";
+
+// ============================================================================
+// Aggregated Data Types
+// ============================================================================
+
+/**
+ * Market data for a single asset
+ */
+export interface MarketAsset {
+  symbol: string;
+  coinType: string;
+  decimals: number;
+  price: number;
+  supplyApy: number; // Percentage (e.g., 5.5)
+  borrowApy: number; // Percentage (e.g., 8.0)
+  maxLtv: number;
+  liquidationThreshold: number;
+  totalSupply: number;
+  totalBorrow: number;
+  availableLiquidity: number;
+}
+
+/**
+ * User position for a single asset (Supply or Borrow)
+ */
+export interface Position {
+  symbol: string;
+  coinType: string;
+  side: "supply" | "borrow";
+  amount: number;
+  valueUsd: number;
+  apy: number;
+}
+
+/**
+ * Aggregated account portfolio for a protocol
+ */
+export interface AccountPortfolio {
+  protocol: LendingProtocol;
+  address: string;
+  healthFactor: number;
+  netValueUsd: number;
+  totalCollateralUsd: number;
+  totalDebtUsd: number;
+  positions: Position[];
+}

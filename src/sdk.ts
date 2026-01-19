@@ -20,6 +20,8 @@ import {
   SDKOptions,
   USDC_COIN_TYPE,
   DEFAULT_7K_PARTNER,
+  MarketAsset,
+  AccountPortfolio,
 } from "./types";
 
 import { ILendingProtocol } from "./protocols/interface";
@@ -385,6 +387,69 @@ export class DefiDashSDK {
   }
 
   // ============================================================================
+  // Aggregation Methods
+  // ============================================================================
+
+  /**
+   * Get aggregated market data from all supported protocols
+   */
+  async getAggregatedMarkets(): Promise<Record<string, MarketAsset[]>> {
+    this.ensureInitialized();
+    const result: Record<string, MarketAsset[]> = {};
+    const protocols = [LendingProtocol.Suilend, LendingProtocol.Navi];
+
+    await Promise.all(
+      protocols.map(async (p) => {
+        try {
+          const adapter = this.protocols.get(p);
+          if (adapter) {
+            result[p] = await adapter.getMarkets();
+          }
+        } catch (e) {
+          console.error(`Failed to fetch markets for ${p}`, e);
+          result[p] = [];
+        }
+      }),
+    );
+
+    return result;
+  }
+
+  /**
+   * Get aggregated portfolio data from all supported protocols
+   */
+  async getAggregatedPortfolio(): Promise<AccountPortfolio[]> {
+    this.ensureInitialized();
+    const protocols = [LendingProtocol.Suilend, LendingProtocol.Navi];
+    const address = this.userAddress;
+
+    const portfolios = await Promise.all(
+      protocols.map(async (p) => {
+        try {
+          const adapter = this.protocols.get(p);
+          if (adapter) {
+            return await adapter.getAccountPortfolio(address);
+          }
+        } catch (e) {
+          console.error(`Failed to fetch portfolio for ${p}`, e);
+        }
+        // Return resilient default
+        return {
+          protocol: p,
+          address,
+          healthFactor: Infinity,
+          netValueUsd: 0,
+          totalCollateralUsd: 0,
+          totalDebtUsd: 0,
+          positions: [],
+        } as AccountPortfolio;
+      }),
+    );
+
+    return portfolios;
+  }
+
+  // ============================================================================
   // Preview Methods
   // ============================================================================
 
@@ -418,26 +483,6 @@ export class DefiDashSDK {
   async getTokenPrice(asset: string): Promise<number> {
     const coinType = this.resolveCoinType(asset);
     return getTokenPrice(coinType);
-  }
-
-  /**
-   * Get wallet balances
-   */
-  async getBalances(): Promise<
-    Array<{ coinType: string; symbol: string; balance: string }>
-  > {
-    this.ensureInitialized();
-    const balances = await this.suiClient.getAllBalances({
-      owner: this.userAddress,
-    });
-
-    return balances
-      .filter((b) => Number(b.totalBalance) > 0)
-      .map((b) => ({
-        coinType: b.coinType,
-        symbol: b.coinType.split("::").pop() || "???",
-        balance: b.totalBalance,
-      }));
   }
 
   /**
