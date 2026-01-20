@@ -42,7 +42,7 @@ function normalizeCoinType(coinType: string): string {
 
 function formatUnits(
   amount: string | number | bigint,
-  decimals: number
+  decimals: number,
 ): string {
   const s = amount.toString();
   if (decimals === 0) return s;
@@ -51,7 +51,7 @@ function formatUnits(
   return (
     `${pad.slice(0, transition)}.${pad.slice(transition)}`.replace(
       /\.?0+$/,
-      ""
+      "",
     ) || "0"
   );
 }
@@ -85,7 +85,7 @@ async function main() {
   const suilendClient = await SuilendClient.initialize(
     LENDING_MARKET_ID,
     LENDING_MARKET_TYPE,
-    suiClient
+    suiClient,
   );
   const metaAg = new MetaAg({
     partner:
@@ -98,7 +98,7 @@ async function main() {
   const obligationOwnerCaps = await SuilendClient.getObligationOwnerCaps(
     userAddress,
     [LENDING_MARKET_TYPE],
-    suiClient
+    suiClient,
   );
 
   if (obligationOwnerCaps.length === 0) {
@@ -112,7 +112,7 @@ async function main() {
   const obligation = await SuilendClient.getObligation(
     obligationId,
     [LENDING_MARKET_TYPE],
-    suiClient
+    suiClient,
   );
 
   if (!obligation) {
@@ -215,14 +215,14 @@ async function main() {
   console.log(
     `  Collateral: ${formatUnits(
       supplyAmount,
-      supplyDecimals
-    )} ${supplySymbol} (~$${supplyValueUsd.toFixed(2)})`
+      supplyDecimals,
+    )} ${supplySymbol} (~$${supplyValueUsd.toFixed(2)})`,
   );
   console.log(
     `  Debt:       ${formatUnits(
       borrowAmount,
-      borrowDecimals
-    )} ${borrowSymbol} (~$${borrowValueUsd.toFixed(2)})`
+      borrowDecimals,
+    )} ${borrowSymbol} (~$${borrowValueUsd.toFixed(2)})`,
   );
   console.log(`  Net Value:  ~$${netValueUsd.toFixed(2)}`);
   console.log(`─`.repeat(55));
@@ -236,7 +236,7 @@ async function main() {
 
     console.log(`\n🔍 Flash Loan Details:`);
     console.log(
-      `  Flash Loan: ${formatUnits(flashLoanUsdc, 6)} USDC (debt + 0.5% buffer)`
+      `  Flash Loan: ${formatUnits(flashLoanUsdc, 6)} USDC (debt + 0.5% buffer)`,
     );
     console.log(`  Flash Fee:  ${formatUnits(flashLoanFee, 6)} USDC`);
 
@@ -255,7 +255,7 @@ async function main() {
     }
 
     const fullQuote = fullSwapQuotes.sort(
-      (a, b) => Number(b.amountOut) - Number(a.amountOut)
+      (a, b) => Number(b.amountOut) - Number(a.amountOut),
     )[0];
 
     const fullSwapOut = BigInt(fullQuote.amountOut);
@@ -266,13 +266,13 @@ async function main() {
       console.log(`\n❌ Error: Collateral value is insufficient`);
       console.log(`   Max swap output:   ${formatUnits(fullSwapOut, 6)} USDC`);
       console.log(
-        `   Required to repay: ${formatUnits(totalRepayment, 6)} USDC`
+        `   Required to repay: ${formatUnits(totalRepayment, 6)} USDC`,
       );
       console.log(
         `   Shortfall:         ${formatUnits(
           totalRepayment - fullSwapOut,
-          6
-        )} USDC`
+          6,
+        )} USDC`,
       );
       console.log(`\n   Position may be underwater.`);
       return;
@@ -292,24 +292,24 @@ async function main() {
 
     console.log(`  Full swap would yield: ${formatUnits(fullSwapOut, 6)} USDC`);
     console.log(
-      `  Flash loan repayment:  ${formatUnits(totalRepayment, 6)} USDC`
+      `  Flash loan repayment:  ${formatUnits(totalRepayment, 6)} USDC`,
     );
     console.log(
       `  Target swap output:    ${formatUnits(
         targetUsdcOut,
-        6
-      )} USDC (with 2% buffer)`
+        6,
+      )} USDC (with 2% buffer)`,
     );
     console.log(
       `  Required ${supplySymbol} input:   ${formatUnits(
         actualSwapIn,
-        supplyDecimals
-      )} ${supplySymbol}`
+        supplyDecimals,
+      )} ${supplySymbol}`,
     );
 
     // Get actual quote for the calculated amount
     console.log(
-      `\n🔍 Fetching optimized swap quote: ${supplySymbol} → USDC...`
+      `\n🔍 Fetching optimized swap quote: ${supplySymbol} → USDC...`,
     );
     const swapQuotes = await metaAg.quote({
       amountIn: actualSwapIn.toString(),
@@ -323,7 +323,7 @@ async function main() {
     }
 
     const bestQuote = swapQuotes.sort(
-      (a, b) => Number(b.amountOut) - Number(a.amountOut)
+      (a, b) => Number(b.amountOut) - Number(a.amountOut),
     )[0];
 
     const expectedUsdcOut = BigInt(bestQuote.amountOut);
@@ -332,23 +332,23 @@ async function main() {
     console.log(
       `  Swap:     ${formatUnits(
         actualSwapIn,
-        supplyDecimals
-      )} ${supplySymbol} → ${formatUnits(expectedUsdcOut, 6)} USDC`
+        supplyDecimals,
+      )} ${supplySymbol} → ${formatUnits(expectedUsdcOut, 6)} USDC`,
     );
     console.log(
       `  Keep:     ${formatUnits(
         keepCollateral,
-        supplyDecimals
+        supplyDecimals,
       )} ${supplySymbol} (~$${(
         (Number(keepCollateral) / Math.pow(10, supplyDecimals)) *
         supplyPrice
-      ).toFixed(2)})`
+      ).toFixed(2)})`,
     );
 
     // Verify swap output covers flash loan repayment
     if (expectedUsdcOut < totalRepayment) {
       console.log(
-        `\n⚠️  Warning: Swap output may not cover flash loan, using full swap instead`
+        `\n⚠️  Warning: Swap output may not cover flash loan, using full swap instead`,
       );
     }
 
@@ -360,11 +360,11 @@ async function main() {
     console.log(
       `  ${supplySymbol} kept:      ${formatUnits(
         keepCollateral,
-        supplyDecimals
-      )} ${supplySymbol}`
+        supplyDecimals,
+      )} ${supplySymbol}`,
     );
     console.log(
-      `  USDC remaining: ${formatUnits(estimatedUsdcProfit, 6)} USDC`
+      `  USDC remaining: ${formatUnits(estimatedUsdcProfit, 6)} USDC`,
     );
     console.log(`  Total value:    ~$${totalProfitUsd.toFixed(2)}`);
 
@@ -379,7 +379,7 @@ async function main() {
     const [loanCoin, receipt] = flashLoanClient.borrowFlashLoan(
       tx,
       flashLoanUsdc,
-      "usdc"
+      "usdc",
     );
 
     // B. Refresh oracles before repay
@@ -399,8 +399,8 @@ async function main() {
     console.log(
       `  Step 4: Withdraw ${formatUnits(
         withdrawAmount,
-        supplyDecimals
-      )} ${supplySymbol} from Suilend`
+        supplyDecimals,
+      )} ${supplySymbol} from Suilend`,
     );
     const withdrawnCoinResult = await suilendClient.withdraw(
       existingCap.id,
@@ -408,15 +408,15 @@ async function main() {
       supplyCoinType,
       withdrawAmount.toString(),
       tx,
-      false // Already refreshed above
+      false, // Already refreshed above
     );
 
     // E. Split: only swap what we need, keep the rest
     console.log(
       `  Step 5: Split ${supplySymbol} - swap only ${formatUnits(
         actualSwapIn,
-        supplyDecimals
-      )} ${supplySymbol}`
+        supplyDecimals,
+      )} ${supplySymbol}`,
     );
     const [coinToSwap] = tx.splitCoins(withdrawnCoinResult[0] as any, [
       actualSwapIn,
@@ -431,7 +431,7 @@ async function main() {
         coinIn: coinToSwap,
         tx: tx,
       },
-      100
+      100,
     );
 
     // G. Split exact repayment for flash loan from swapped USDC
@@ -446,7 +446,7 @@ async function main() {
     console.log(`  Step 8: Transfer remaining assets to user`);
     tx.transferObjects(
       [withdrawnCoinResult[0] as any, swappedUsdc as any, loanCoin as any],
-      userAddress
+      userAddress,
     );
 
     // 6. Execute Transaction
@@ -467,16 +467,16 @@ async function main() {
       console.log(
         `    • ${formatUnits(
           keepCollateral,
-          supplyDecimals
+          supplyDecimals,
         )} ${supplySymbol} (~$${(
           (Number(keepCollateral) / Math.pow(10, supplyDecimals)) *
           supplyPrice
-        ).toFixed(2)})`
+        ).toFixed(2)})`,
       );
       console.log(
         `    • ${formatUnits(estimatedUsdcProfit, 6)} USDC (~$${(
           Number(estimatedUsdcProfit) / 1e6
-        ).toFixed(2)})`
+        ).toFixed(2)})`,
       );
       console.log(`  Total value: ~$${totalProfitUsd.toFixed(2)}`);
       console.log(`─`.repeat(55));

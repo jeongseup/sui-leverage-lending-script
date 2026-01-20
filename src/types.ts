@@ -1,12 +1,8 @@
-/**
- * DeFi Dash SDK - Core Types
- */
-
-import { Transaction } from "@mysten/sui/transactions";
-
 // ============================================================================
 // Enums
 // ============================================================================
+
+export type PositionSide = "supply" | "borrow";
 
 /**
  * Supported lending protocols
@@ -96,6 +92,18 @@ export interface PositionInfo {
 
   /** Liquidation price of collateral */
   liquidationPrice?: number;
+
+  /** Total deposited USD */
+  totalDepositedUsd?: number;
+
+  /** Weighted borrows USD (for health factor calculation) */
+  weightedBorrowsUsd?: number;
+
+  /** Borrow limit USD */
+  borrowLimitUsd?: number;
+
+  /** Liquidation threshold USD */
+  liquidationThresholdUsd?: number;
 }
 
 // ============================================================================
@@ -182,6 +190,8 @@ export const SUI_COIN_TYPE =
 export const DEFAULT_7K_PARTNER =
   "0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf";
 
+// End of types
+
 // ============================================================================
 // Aggregated Data Types
 // ============================================================================
@@ -207,12 +217,21 @@ export interface MarketAsset {
  * User position for a single asset (Supply or Borrow)
  */
 export interface Position {
-  symbol: string;
+  protocol: LendingProtocol;
   coinType: string;
-  side: "supply" | "borrow";
+  symbol: string;
+  side: PositionSide;
   amount: number;
+  /** Raw on-chain amount */
+  amountRaw?: string;
   valueUsd: number;
   apy: number;
+  /** Rewards APY component */
+  rewardsApy?: number;
+  /** Earned rewards details */
+  rewards?: { symbol: string; amount: number; valueUsd?: number }[];
+  /** Estimated liquidation price for collateral (if supply side) */
+  estimatedLiquidationPrice?: number;
 }
 
 /**
@@ -222,8 +241,28 @@ export interface AccountPortfolio {
   protocol: LendingProtocol;
   address: string;
   healthFactor: number;
+
   netValueUsd: number;
   totalCollateralUsd: number;
   totalDebtUsd: number;
+
+  /** Total deposited USD */
+  totalDepositedUsd?: number;
+
+  /** Weighted borrows USD (for health factor calculation) */
+  weightedBorrowsUsd?: number;
+
+  /** Borrow limit USD */
+  borrowLimitUsd?: number;
+
+  /** Liquidation threshold USD */
+  liquidationThresholdUsd?: number;
+
   positions: Position[];
+
+  /** Net APY on Equity (Annualized return % on net value) */
+  netApy?: number;
+
+  /** Estimated Annual Net Earnings in USD */
+  totalAnnualNetEarningsUsd?: number;
 }

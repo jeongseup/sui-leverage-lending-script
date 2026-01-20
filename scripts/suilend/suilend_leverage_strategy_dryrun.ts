@@ -1,6 +1,6 @@
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.scripts" }); // Load SECRET_KEY from .env
- // Load other configs from .env.public
+// Load other configs from .env.public
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
@@ -27,7 +27,7 @@ function normalizeCoinType(coinType: string) {
 
 function formatUnits(
   amount: string | number | bigint,
-  decimals: number
+  decimals: number,
 ): string {
   const s = amount.toString();
   if (decimals === 0) return s;
@@ -36,7 +36,7 @@ function formatUnits(
   return (
     `${pad.slice(0, transition)}.${pad.slice(transition)}`.replace(
       /\.?0+$/,
-      ""
+      "",
     ) || "0"
   );
 }
@@ -61,7 +61,7 @@ async function main() {
   const suilendClient = await SuilendClient.initialize(
     LENDING_MARKET_ID,
     LENDING_MARKET_TYPE,
-    suiClient
+    suiClient,
   );
   const metaAg = new MetaAg({
     partner:
@@ -134,24 +134,24 @@ async function main() {
   console.log(
     `  Initial Deposit:    ${formatUnits(
       DEPOSIT_AMOUNT,
-      decimals
-    )} ${symbol} (Raw: ${DEPOSIT_AMOUNT})`
+      decimals,
+    )} ${symbol} (Raw: ${DEPOSIT_AMOUNT})`,
   );
   console.log(`  ${symbol} Price:         $${depositPrice.toLocaleString()}`);
   console.log(`  Initial Equity:     ~$${initialEquityUsd.toFixed(2)}`);
   console.log(`─`.repeat(55));
   console.log(
-    `  Multiplier:         ${MULTIPLIER}x (Max: ${maxMultiplier.toFixed(2)}x)`
+    `  Multiplier:         ${MULTIPLIER}x (Max: ${maxMultiplier.toFixed(2)}x)`,
   );
   console.log(
     `  Flash Loan:         ${formatUnits(
       flashLoanUsdc,
-      6
-    )} USDC (~$${flashLoanUsd.toFixed(2)})`
+      6,
+    )} USDC (~$${flashLoanUsd.toFixed(2)})`,
   );
   console.log(`─`.repeat(55));
   console.log(
-    `  Total Collateral:   ~$${totalPositionUsd.toFixed(2)} ${symbol}`
+    `  Total Collateral:   ~$${totalPositionUsd.toFixed(2)} ${symbol}`,
   );
   console.log(`  Total Debt:         ~$${debtUsd.toFixed(2)} USDC`);
   console.log(`  Net Worth:          ~$${netWorthUsd.toFixed(2)}`);
@@ -159,19 +159,19 @@ async function main() {
   console.log(
     `  Liquidation Price:  $${liquidationPrice.toLocaleString(undefined, {
       maximumFractionDigits: 0,
-    })}`
+    })}`,
   );
   console.log(
     `  Price Drop Buffer:  ${(
       (1 - liquidationPrice / depositPrice) *
       100
-    ).toFixed(1)}%`
+    ).toFixed(1)}%`,
   );
   console.log(`─`.repeat(55));
 
   if (MULTIPLIER > maxMultiplier) {
     console.error(
-      `\n❌ Multiplier ${MULTIPLIER}x exceeds max ${maxMultiplier.toFixed(2)}x!`
+      `\n❌ Multiplier ${MULTIPLIER}x exceeds max ${maxMultiplier.toFixed(2)}x!`,
     );
     return;
   }
@@ -191,12 +191,12 @@ async function main() {
     }
 
     const bestQuote = swapQuotes.sort(
-      (a, b) => Number(b.amountOut) - Number(a.amountOut)
+      (a, b) => Number(b.amountOut) - Number(a.amountOut),
     )[0];
 
     const expectedOutput = Number(bestQuote.amountOut);
     console.log(
-      `  Expected:     ${formatUnits(expectedOutput, decimals)} ${symbol}`
+      `  Expected:     ${formatUnits(expectedOutput, decimals)} ${symbol}`,
     );
 
     // 5. Build Transaction
@@ -209,7 +209,7 @@ async function main() {
     const [loanCoin, receipt] = flashLoanClient.borrowFlashLoan(
       tx,
       BigInt(flashLoanUsdc),
-      "usdc"
+      "usdc",
     );
 
     // B. Swap USDC to deposit asset
@@ -221,14 +221,14 @@ async function main() {
         coinIn: loanCoin,
         tx: tx,
       },
-      100
+      100,
     );
 
     // C. Get or create obligation
     const obligationOwnerCaps = await SuilendClient.getObligationOwnerCaps(
       userAddress,
       [LENDING_MARKET_TYPE],
-      suiClient
+      suiClient,
     );
     const existingCap = obligationOwnerCaps[0];
     let obligationOwnerCap: any;
@@ -253,7 +253,7 @@ async function main() {
     if (isSui) {
       // For SUI: split user's deposit amount from gas, then merge with swapped SUI
       console.log(
-        `  Step 4: Split user's SUI from gas and merge with swapped SUI`
+        `  Step 4: Split user's SUI from gas and merge with swapped SUI`,
       );
       // Split only user's initial deposit amount (not including expected swap output)
       const [userDeposit] = tx.splitCoins(tx.gas, [BigInt(DEPOSIT_AMOUNT)]);
@@ -304,7 +304,7 @@ async function main() {
       const obligation = await SuilendClient.getObligation(
         obligationId,
         [LENDING_MARKET_TYPE],
-        suiClient
+        suiClient,
       );
       // Include both deposit coin and USDC in refresh
       await suilendClient.refreshAll(tx, obligation, [
@@ -325,12 +325,12 @@ async function main() {
       depositCoin,
       normalizedDepositCoin,
       obligationOwnerCap,
-      tx
+      tx,
     );
 
     // G. Calculate repayment amount (flash loan + fee)
     const flashLoanFee = ScallopFlashLoanClient.calculateFee(
-      BigInt(flashLoanUsdc)
+      BigInt(flashLoanUsdc),
     );
     const repaymentAmount = BigInt(flashLoanUsdc) + flashLoanFee;
 
@@ -338,8 +338,8 @@ async function main() {
     console.log(
       `  Step 7: Borrow ${formatUnits(
         repaymentAmount,
-        6
-      )} USDC (includes flash loan fee)`
+        6,
+      )} USDC (includes flash loan fee)`,
     );
     const borrowedUsdc = await suilendClient.borrow(
       obligationOwnerCap,
@@ -347,7 +347,7 @@ async function main() {
       USDC_COIN_TYPE,
       repaymentAmount.toString(),
       tx,
-      false // Already did refreshAll above
+      false, // Already did refreshAll above
     );
 
     // H. Repay flash loan with borrowed USDC

@@ -11,6 +11,11 @@ import {
   LENDING_MARKET_ID,
   LENDING_MARKET_TYPE,
 } from "@suilend/sdk";
+import { parseReserve } from "@suilend/sdk/parsers/reserve";
+import { parseObligation } from "@suilend/sdk/parsers/obligation";
+import { refreshReservePrice } from "@suilend/sdk/utils/simulate";
+import { CoinMetadata } from "@mysten/sui/client";
+import { normalizeStructTag } from "@mysten/sui/utils";
 import { ILendingProtocol, ReserveInfo } from "./interface";
 import {
   PositionInfo,
@@ -24,6 +29,13 @@ import {
 import { normalizeCoinType, formatUnits } from "../lib/utils";
 import { getReserveByCoinType, SUILEND_RESERVES } from "../lib/suilend/const";
 import { getTokenPrice } from "@7kprotocol/sdk-ts";
+import {
+  calculatePortfolioMetrics,
+  calculateRewardsEarned,
+  calculateLiquidationPrice,
+  calculateRewardApy,
+} from "../lib/suilend/calculators";
+import BigNumber from "bignumber.js";
 
 // Suilend uses WAD (10^18) for internal precision
 const WAD = 10n ** 18n;
@@ -330,26 +342,35 @@ export class SuilendAdapter implements ILendingProtocol {
     );
   }
 
+  private coinMetadataCache: Record<string, CoinMetadata> = {};
+
   async getAccountPortfolio(address: string): Promise<AccountPortfolio> {
     this.ensureInitialized();
 
-    // Reuse specific obligation logic
     const caps = await SuilendClient.getObligationOwnerCaps(
       address,
       [LENDING_MARKET_TYPE],
       this.suiClient,
     );
 
+    const emptyPortfolio: AccountPortfolio = {
+      protocol: LendingProtocol.Suilend,
+      address,
+      healthFactor: Infinity,
+      netValueUsd: 0,
+      totalCollateralUsd: 0,
+      totalDepositedUsd: 0,
+      totalDebtUsd: 0,
+      weightedBorrowsUsd: 0,
+      borrowLimitUsd: 0,
+      liquidationThresholdUsd: 0,
+      positions: [],
+      netApy: 0,
+      totalAnnualNetEarningsUsd: 0,
+    };
+
     if (caps.length === 0) {
-      return {
-        protocol: LendingProtocol.Suilend,
-        address,
-        healthFactor: Infinity,
-        netValueUsd: 0,
-        totalCollateralUsd: 0,
-        totalDebtUsd: 0,
-        positions: [],
-      };
+      return emptyPortfolio;
     }
 
     const obligation = await SuilendClient.getObligation(
@@ -358,83 +379,165 @@ export class SuilendAdapter implements ILendingProtocol {
       this.suiClient,
     );
 
+    if (!obligation) return emptyPortfolio;
+
+    // Use reserves directly (already fetched by initialize)
+    const refreshedReserves = this.client.lendingMarket.reserves;
+
+    // Build Metadata Map (reusing logic specific to this adapter's cache)
+    const allCoinTypes = new Set<string>();
+    refreshedReserves.forEach((r) => {
+      allCoinTypes.add(r.coinType.name);
+      r.depositsPoolRewardManager.poolRewards.forEach((pr) => {
+        if (pr) allCoinTypes.add(pr.coinType.name);
+      });
+      r.borrowsPoolRewardManager.poolRewards.forEach((pr) => {
+        if (pr) allCoinTypes.add(pr.coinType.name);
+      });
+    });
+
+    const uniqueCoinTypes = Array.from(allCoinTypes);
+    await Promise.all(
+      uniqueCoinTypes.map(async (ct) => {
+        const normalized = normalizeStructTag(ct);
+        if (!this.coinMetadataCache[normalized]) {
+          try {
+            const metadata = await this.suiClient.getCoinMetadata({
+              coinType: ct,
+            });
+            if (metadata) {
+              this.coinMetadataCache[normalized] = metadata;
+            }
+          } catch (e) {
+            // ignore failed metadata fetch
+          }
+        }
+      }),
+    );
+
+    // Create a map for parser with fallbacks
+    const coinMetadataMap: Record<string, CoinMetadata> = {
+      ...this.coinMetadataCache,
+    };
+    uniqueCoinTypes.forEach((ct) => {
+      const normalized = normalizeStructTag(ct);
+      if (!coinMetadataMap[normalized]) {
+        coinMetadataMap[normalized] = {
+          decimals: 9,
+          name: ct,
+          symbol: ct.split("::").pop() ?? "UNK",
+          description: "",
+          iconUrl: "",
+          id: "",
+        };
+      }
+    });
+
+    const parsedReserveMap: Record<string, any> = {};
+    refreshedReserves.forEach((r) => {
+      const parsed = parseReserve(r, coinMetadataMap);
+      parsedReserveMap[normalizeStructTag(parsed.coinType)] = parsed;
+    });
+
+    console.log(
+      "SDK Available Reserves:",
+      Object.values(parsedReserveMap).map((r: any) => r.token.symbol),
+    );
+
+    const parsedObligation = parseObligation(obligation, parsedReserveMap);
+
+    // --- USE CALCULATORS ---
+    const metrics = calculatePortfolioMetrics(
+      parsedObligation,
+      parsedReserveMap,
+    );
+
+    // Map to positions
     const positions: Position[] = [];
-    let totalCollateralUsd = 0;
-    let totalDebtUsd = 0;
 
-    if (obligation) {
-      const deposits = obligation.deposits || [];
-      for (const d of deposits) {
-        const coinType = normalizeCoinType((d as any).coinType.name);
-        const reserve = (this.client.lendingMarket.reserves as any[]).find(
-          (r) => normalizeCoinType(r.coinType.name) === coinType,
-        );
-        if (!reserve) continue;
+    // Deposits
+    parsedObligation.deposits.forEach((d) => {
+      const reserve = d.reserve;
+      const earnings = calculateRewardsEarned(
+        d.userRewardManager,
+        reserve,
+        true,
+      );
 
-        const localReserve = getReserveByCoinType(coinType);
-        const decimals = localReserve?.decimals || 9;
-        const symbol = localReserve?.symbol || "UNKNOWN";
+      // Reward APY
+      const totalDepositedUsd = new BigNumber(d.reserve.depositedAmountUsd);
+      const rewardApyStats = calculateRewardApy(
+        reserve.depositsPoolRewardManager,
+        totalDepositedUsd,
+        parsedReserveMap,
+      );
+      const interestApy = d.reserve.depositAprPercent.div(100).toNumber();
 
-        const price = Number(reserve.price) / 1e18;
-        const rate = Number(reserve.cTokenExchangeRate) / 1e18;
-        const rawAmount = BigInt((d as any).depositedCtokenAmount);
-        const amount = (Number(rawAmount) / Math.pow(10, decimals)) * rate;
+      // Liquidation Price
+      const amountBig = new BigNumber(d.depositedAmount);
+      const liqPriceBig = calculateLiquidationPrice(
+        d.reserve.coinType,
+        amountBig,
+        Number(d.reserve.config.closeLtvPct) / 100,
+        parsedObligation,
+      );
 
-        const valueUsd = amount * price;
-        totalCollateralUsd += valueUsd;
+      positions.push({
+        protocol: LendingProtocol.Suilend,
+        coinType: d.coinType,
+        symbol: d.reserve.token.symbol,
+        side: "supply",
+        amount: d.depositedAmount.toNumber(),
+        amountRaw: d.depositedAmount
+          .times(Math.pow(10, d.reserve.mintDecimals))
+          .toFixed(0),
+        valueUsd: d.depositedAmountUsd.toNumber(),
+        apy: interestApy + rewardApyStats.totalRewardApy / 100,
+        rewardsApy: rewardApyStats.totalRewardApy / 100,
+        rewards: earnings,
+        estimatedLiquidationPrice: liqPriceBig
+          ? liqPriceBig.toNumber()
+          : undefined,
+      });
+    });
 
-        positions.push({
-          symbol,
-          coinType,
-          side: "supply",
-          amount,
-          valueUsd,
-          apy: 0,
-        });
-      }
-
-      const borrows = obligation.borrows || [];
-      for (const b of borrows) {
-        const coinType = normalizeCoinType((b as any).coinType.name);
-        const reserve = (this.client.lendingMarket.reserves as any[]).find(
-          (r) => normalizeCoinType(r.coinType.name) === coinType,
-        );
-        if (!reserve) continue;
-
-        const localReserve = getReserveByCoinType(coinType);
-        const decimals = localReserve?.decimals || 9;
-        const symbol = localReserve?.symbol || "UNKNOWN";
-
-        const price = Number(reserve.price) / 1e18;
-
-        const rawAmount = BigInt((b as any).borrowedAmount.value);
-        const amount = Number(rawAmount) / 1e18;
-
-        const valueUsd = amount * price;
-        totalDebtUsd += valueUsd;
-
-        positions.push({
-          symbol,
-          coinType,
-          side: "borrow",
-          amount,
-          valueUsd,
-          apy: 0,
-        });
-      }
-    }
-
-    const healthFactor =
-      totalDebtUsd > 0 ? totalCollateralUsd / totalDebtUsd : Infinity;
+    // Borrows
+    parsedObligation.borrows.forEach((b) => {
+      const reserve = b.reserve;
+      const earnings = calculateRewardsEarned(
+        b.userRewardManager,
+        reserve,
+        false,
+      );
+      positions.push({
+        protocol: LendingProtocol.Suilend,
+        coinType: b.coinType,
+        symbol: b.reserve.token.symbol,
+        side: "borrow",
+        amount: b.borrowedAmount.toNumber(),
+        amountRaw: b.borrowedAmount
+          .times(Math.pow(10, b.reserve.mintDecimals))
+          .toFixed(0),
+        valueUsd: b.borrowedAmountUsd.toNumber(),
+        apy: b.reserve.borrowAprPercent.div(100).toNumber(),
+        rewards: earnings,
+      });
+    });
 
     return {
       protocol: LendingProtocol.Suilend,
       address,
-      healthFactor,
-      netValueUsd: totalCollateralUsd - totalDebtUsd,
-      totalCollateralUsd,
-      totalDebtUsd,
+      healthFactor: metrics.healthFactor.toNumber(),
+      netValueUsd: metrics.netValue.toNumber(),
+      totalCollateralUsd: metrics.totalSupply.toNumber(),
+      totalDepositedUsd: metrics.totalSupply.toNumber(),
+      totalDebtUsd: metrics.totalBorrow.toNumber(),
+      weightedBorrowsUsd: parsedObligation.weightedBorrowsUsd.toNumber(),
+      borrowLimitUsd: metrics.borrowLimit.toNumber(),
+      liquidationThresholdUsd: metrics.liquidationThreshold.toNumber(),
       positions,
+      netApy: metrics.netApy.toNumber(),
+      totalAnnualNetEarningsUsd: metrics.totalAnnualNetEarnings.toNumber(),
     };
   }
 

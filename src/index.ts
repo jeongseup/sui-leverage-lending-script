@@ -43,6 +43,8 @@ export {
   SDKOptions,
   USDC_COIN_TYPE,
   SUI_COIN_TYPE,
+  AccountPortfolio,
+  MarketAsset,
 } from "./types";
 
 // Protocol Adapters (for advanced usage)

@@ -373,6 +373,7 @@ export class NaviAdapter implements ILendingProtocol {
         );
 
         positions.push({
+          protocol: LendingProtocol.Navi,
           symbol,
           coinType,
           side: "supply",
@@ -392,6 +393,7 @@ export class NaviAdapter implements ILendingProtocol {
         );
 
         positions.push({
+          protocol: LendingProtocol.Navi,
           symbol,
           coinType,
           side: "borrow",

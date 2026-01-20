@@ -204,3 +204,89 @@ const dryRun = async () => {
   }
 };
 ```
+
+---
+
+### Aggregated Portfolio (Rich Data)
+
+Use `getAggregatedPortfolio` to get a unified view across protocols, including:
+
+- Net APY (Equity APY)
+- Annual Net Earnings (USD)
+- Detailed Reward Breakdown
+- Estimated Liquidation Price
+
+```tsx
+import { useDefiDash } from './useDefiDash';
+import { useQuery } from '@tanstack/react-query';
+
+function PortfolioTable() {
+  const { getSDK, isConnected } = useDefiDash();
+
+  const { data: portfolios } = useQuery({
+    queryKey: ['portfolio', 'aggregated'],
+    queryFn: async () => {
+      if (!isConnected) return [];
+      const sdk = await getSDK();
+      return sdk.getAggregatedPortfolio();
+      // Returns AccountPortfolio[]
+    },
+    enabled: isConnected,
+  });
+
+  if (!portfolios) return null;
+
+  return (
+    <div>
+      {portfolios.map(p => (
+        <div key={p.protocol}>
+          <h3>{p.protocol}</h3>
+
+          <div className="stats">
+             <p>Net Value: ${p.netValueUsd.toFixed(2)}</p>
+             <p>Net APY: {p.netApy ? p.netApy.toFixed(2) : '0.00'}%</p>
+             <p>Annual Earn: ${p.totalAnnualNetEarningsUsd?.toFixed(2)}</p>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Side</th>
+                <th>Amount</th>
+                <th>APY (Inc. Rewards)</th>
+                <th>Rewards</th>
+                <th>Est. Liq Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {p.positions.map(pos => (
+                <tr key={pos.coinType + pos.side}>
+                  <td>{pos.symbol}</td>
+                  <td>{pos.side}</td>
+                  <td>{pos.amount.toFixed(4)}</td>
+                  <td>{pos.apy.toFixed(2)}%</td>
+                  <td>
+                    {pos.rewards && pos.rewards.length > 0 ? (
+                      pos.rewards.map(r => (
+                        <div key={r.uniqueId}>
+                          +{r.amount.toFixed(6)} {r.symbol}
+                        </div>
+                      ))
+                    ) : '-'}
+                  </td>
+                  <td>
+                    {pos.estimatedLiquidationPrice
+                      ? `$${pos.estimatedLiquidationPrice.toFixed(4)}`
+                      : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+}
+```

@@ -10,6 +10,11 @@
   "scripts": {
     "start": "ts-node src/index.ts",
     "build": "tsc",
+    "test": "ts-node tests/runner.ts",
+    "example:portfolio": "npx ts-node examples/get_portfolio.ts",
+    "example:markets": "npx ts-node examples/get_markets.ts",
+    "example:limits": "npx ts-node examples/get_limits.ts",
+    "lint": "eslint src --ext .ts",
     "prepublishOnly": "npm run build",
     "publish:npm": "npm run build && npm publish",
     "publish:dry": "npm run build && npm publish --dry-run",
